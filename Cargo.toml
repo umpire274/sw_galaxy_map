@@ -1,7 +1,7 @@
 [package]
 name = "sw_galaxy_map"
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0-dev"
+edition = "2024"
 
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "Command-line tool to query and explore the Star Wars galaxy using a local SQLite database"

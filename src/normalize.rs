@@ -1,6 +1,6 @@
 use regex::Regex;
-use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 pub fn normalize_text(input: &str) -> String {
     let lower = input.trim().to_lowercase();
