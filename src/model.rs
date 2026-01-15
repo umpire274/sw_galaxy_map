@@ -1,3 +1,6 @@
+use anyhow::Result;
+use rusqlite::Row;
+
 #[derive(Debug)]
 pub struct Planet {
     pub fid: i64,
@@ -36,4 +39,32 @@ pub struct NearHit {
     pub x: f64,
     pub y: f64,
     pub distance: f64,
+}
+
+impl Planet {
+    pub fn from_row(r: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            fid: r.get(0)?,
+            planet: r.get(1)?,
+            planet_norm: r.get(2)?,
+            region: r.get(3)?,
+            sector: r.get(4)?,
+            system: r.get(5)?,
+            grid: r.get(6)?,
+            x: r.get(7)?,
+            y: r.get(8)?,
+            canon: r.get(9)?,
+            legends: r.get(10)?,
+            zm: r.get(11)?,
+            name0: r.get(12)?,
+            name1: r.get(13)?,
+            name2: r.get(14)?,
+            lat: r.get(15)?,
+            long: r.get(16)?,
+            reference: r.get(17)?,
+            status: r.get(18)?,
+            c_region: r.get(19)?,
+            c_region_li: r.get(20)?,
+        })
+    }
 }

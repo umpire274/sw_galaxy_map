@@ -8,8 +8,8 @@ use clap::{Parser, Subcommand};
 )]
 pub struct Cli {
     /// Path to the SQLite database
-    #[arg(long, default_value = "res/sw_planets.sqlite")]
-    pub db: String,
+    #[arg(long)]
+    pub db: Option<String>,
 
     #[command(subcommand)]
     pub cmd: Commands,
@@ -48,4 +48,27 @@ pub enum Commands {
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
+
+    /// Database provisioning commands (C2: build local DB from remote data source)
+    Db {
+        #[command(subcommand)]
+        cmd: DbCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DbCommands {
+    /// Initialize the local SQLite database by downloading data from the remote service
+    Init {
+        /// Output path for the generated SQLite database (defaults to OS app data dir)
+        #[arg(long)]
+        out: Option<String>,
+
+        /// Overwrite existing database if present
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+
+    /// Show local database status (path, meta, counts)
+    Status,
 }

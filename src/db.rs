@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, params};
 
 use crate::model::{AliasRow, NearHit, Planet};
 
@@ -9,57 +9,78 @@ pub fn open_db(path: &str) -> Result<Connection> {
 }
 
 pub fn has_table(con: &Connection, table: &str) -> Result<bool> {
-    let exists: Option<i64> = con
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
-            params![table],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(exists.is_some())
+    let n: i64 = con.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?1
+        "#,
+        [table],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
 }
 
 pub fn get_planet_by_norm(con: &Connection, planet_norm: &str) -> Result<Planet> {
-    let mut stmt = con.prepare(
-        r#"
-        SELECT
-            FID, Planet, planet_norm, Region, Sector, System, Grid, X, Y, Canon, Legends, zm,
-            name0, name1, name2, lat, long, ref, status, CRegion, CRegion_li
-        FROM planets
-        WHERE planet_norm = ?1
-        LIMIT 1
-        "#,
-    )?;
+    // 1) Match diretto sul nome normalizzato
+    if let Some(p) = get_planet_by_norm_direct(con, planet_norm)? {
+        return Ok(p);
+    }
 
-    let p = stmt
-        .query_row(params![planet_norm], |r| {
-            Ok(Planet {
-                fid: r.get(0)?,
-                planet: r.get(1)?,
-                planet_norm: r.get(2)?,
-                region: r.get(3)?,
-                sector: r.get(4)?,
-                system: r.get(5)?,
-                grid: r.get(6)?,
-                x: r.get(7)?,
-                y: r.get(8)?,
-                canon: r.get(9)?,
-                legends: r.get(10)?,
-                zm: r.get(11)?,
-                name0: r.get(12)?,
-                name1: r.get(13)?,
-                name2: r.get(14)?,
-                lat: r.get(15)?,
-                long: r.get(16)?,
-                reference: r.get(17)?,
-                status: r.get(18)?,
-                c_region: r.get(19)?,
-                c_region_li: r.get(20)?,
-            })
-        })
-        .with_context(|| format!("Planet not found (planet_norm={planet_norm})"))?;
+    // 2) Fallback: match su alias_norm
+    if let Some(p) = get_planet_by_alias_norm(con, planet_norm)? {
+        return Ok(p);
+    }
 
-    Ok(p)
+    bail!("Planet not found: {}", planet_norm)
+}
+
+fn get_planet_by_norm_direct(con: &Connection, planet_norm: &str) -> Result<Option<Planet>> {
+    let mut stmt = con
+        .prepare(
+            r#"
+            SELECT
+                FID, Planet, planet_norm, Region, Sector, System, Grid,
+                X, Y, Canon, Legends, zm, name0, name1, name2, lat, long,
+                ref, status, CRegion, CRegion_li
+            FROM planets
+            WHERE planet_norm = ?1
+            LIMIT 1
+            "#,
+        )
+        .context("Failed to prepare planet lookup query")?;
+
+    let mut rows = stmt.query([planet_norm])?;
+    if let Some(r) = rows.next()? {
+        Ok(Some(Planet::from_row(r)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn get_planet_by_alias_norm(con: &Connection, alias_norm: &str) -> Result<Option<Planet>> {
+    let mut stmt = con
+        .prepare(
+            r#"
+            SELECT
+                p.FID, p.Planet, p.planet_norm, p.Region, p.Sector, p.System, p.Grid,
+                p.X, p.Y, p.Canon, p.Legends, p.zm, p.name0, p.name1, p.name2, p.lat, p.long,
+                p.ref, p.status, p.CRegion, p.CRegion_li
+            FROM planet_aliases a
+            JOIN planets p ON p.FID = a.planet_fid
+            WHERE a.alias_norm = ?1
+            ORDER BY p.Planet COLLATE NOCASE
+            LIMIT 1
+            "#,
+        )
+        .context("Failed to prepare alias lookup query")?;
+
+    let mut rows = stmt.query([alias_norm])?;
+    if let Some(r) = rows.next()? {
+        Ok(Some(Planet::from_row(r)?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn get_aliases(con: &Connection, fid: i64) -> Result<Vec<AliasRow>> {
@@ -89,46 +110,77 @@ pub fn search_planets(
     query_norm: &str,
     limit: i64,
 ) -> Result<Vec<(i64, String)>> {
-    let use_fts = has_table(con, "planets_fts")?;
+    if has_table(con, "planets_fts")? {
+        return search_planets_fts(con, query_norm, limit);
+    }
 
-    if use_fts {
-        // MATCH su search_norm. Supporta anche prefissi con '*', se l’utente li inserisce.
-        let mut stmt = con.prepare(
+    search_planets_like(con, query_norm, limit)
+}
+
+fn search_planets_like(
+    con: &Connection,
+    query_norm: &str,
+    limit: i64,
+) -> Result<Vec<(i64, String)>> {
+    let like = format!("%{}%", query_norm);
+
+    let mut stmt = con
+        .prepare(
+            r#"
+            SELECT p.FID, p.Planet
+            FROM planet_search s
+            JOIN planets p ON p.FID = s.planet_fid
+            WHERE s.search_norm LIKE ?1
+            ORDER BY p.Planet COLLATE NOCASE
+            LIMIT ?2
+            "#,
+        )
+        .context("Failed to prepare LIKE search query")?;
+
+    let rows = stmt
+        .query_map((like, limit), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .context("Failed to execute LIKE search query")?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+fn search_planets_fts(
+    con: &Connection,
+    query_norm: &str,
+    limit: i64,
+) -> Result<Vec<(i64, String)>> {
+    // For FTS5, search terms are tokenized; normalized text works well.
+    // bm25() provides a reasonable relevance score (lower is better).
+    let mut stmt = con
+        .prepare(
             r#"
             SELECT p.FID, p.Planet
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
             WHERE planets_fts MATCH ?1
-            ORDER BY rank
+            ORDER BY bm25(planets_fts)
             LIMIT ?2
             "#,
-        )?;
-
-        let rows = stmt
-            .query_map(params![query_norm, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        return Ok(rows);
-    }
-
-    // Fallback: LIKE su planet_search.search_norm
-    let like = format!("%{}%", query_norm);
-    let mut stmt = con.prepare(
-        r#"
-        SELECT p.FID, p.Planet
-        FROM planet_search s
-        JOIN planets p ON p.FID = s.planet_fid
-        WHERE s.search_norm LIKE ?1
-        ORDER BY p.Planet COLLATE NOCASE
-        LIMIT ?2
-        "#,
-    )?;
+        )
+        .context("Failed to prepare FTS search query")?;
 
     let rows = stmt
-        .query_map(params![like, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+        .query_map((query_norm, limit), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .context("Failed to execute FTS search query")?;
 
-    Ok(rows)
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 pub fn near_planets(con: &Connection, x: f64, y: f64, r: f64, limit: i64) -> Result<Vec<NearHit>> {
