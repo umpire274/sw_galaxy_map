@@ -1,11 +1,10 @@
-use anyhow::Result;
+use sw_galaxy_map::cli;
+use sw_galaxy_map::ui::error;
 
-mod cli;
-mod db;
-mod model;
-mod normalize;
-mod provision;
-
-fn main() -> Result<()> {
-    cli::run()
+fn main() {
+    if let Err(e) = cli::run() {
+        error(format!("{:#}", e));
+        std::process::exit(1);
+    }
+    println!();
 }

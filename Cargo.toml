@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
@@ -46,6 +46,7 @@ serde_json = "1.0.149"
 directories = "6.0.0"
 chrono = "0.4.43"
 atty = "0.2.14"
+owo-colors = "4.2.3"
 
 [profile.release]
 lto = true

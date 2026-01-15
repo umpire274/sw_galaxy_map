@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+use crate::ui::info;
 use crate::{db, normalize::normalize_text};
 
 pub fn run(con: &Connection, planet: String) -> Result<()> {
@@ -8,6 +9,8 @@ pub fn run(con: &Connection, planet: String) -> Result<()> {
     let p = db::get_planet_by_norm(con, &pn)?;
     let aliases = db::get_aliases(con, p.fid)?;
 
+    info("Planet Information");
+    println!();
     println!("FID: {}", p.fid);
     println!("Planet: {}", p.planet);
     println!("planet_norm: {}", p.planet_norm);

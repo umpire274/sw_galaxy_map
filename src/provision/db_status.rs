@@ -1,3 +1,4 @@
+use crate::ui::{error, success, warning};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::fs;
@@ -58,13 +59,13 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     println!("Database path: {}", db_path.display());
 
     if !db_path.exists() {
-        println!("Status: MISSING");
+        error("Status: MISSING");
         println!("Hint: run `sw_galaxy_map db init` to create it.");
         return Ok(());
     }
 
     let meta = fs::metadata(&db_path).context("Unable to read database file metadata")?;
-    println!("Status: OK");
+    success("Status: OK");
     println!("Size: {} bytes", meta.len());
 
     let con = Connection::open(&db_path)
@@ -134,9 +135,9 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     // Mismatch hint (best-effort)
     let meta_flag = matches!(fts_enabled.as_deref(), Some("1"));
     if meta_flag && !fts_table {
-        println!("  warning: meta says FTS is enabled but planets_fts table is missing");
+        warning("  warning: meta says FTS is enabled but planets_fts table is missing");
     } else if !meta_flag && fts_table {
-        println!("  warning: planets_fts exists but meta says FTS is disabled");
+        warning("  warning: planets_fts exists but meta says FTS is disabled");
     }
 
     Ok(())

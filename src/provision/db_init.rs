@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::provision::{arcgis, build_sqlite, paths};
+use crate::ui::{error, info};
 
 pub fn run(out: Option<String>, force: bool) -> Result<()> {
     let out_path: PathBuf = match out {
@@ -24,7 +25,7 @@ pub fn run(out: Option<String>, force: bool) -> Result<()> {
                 format!("Unable to remove existing database: {}", out_path.display())
             })?;
         } else {
-            eprintln!("Aborted. Existing database was not modified.");
+            error("Aborted. Existing database was not modified.");
             return Ok(());
         }
     }
@@ -45,7 +46,7 @@ pub fn run(out: Option<String>, force: bool) -> Result<()> {
     };
 
     let features = arcgis::fetch_all_features(&client, page_size)?;
-    println!("Downloaded {} features.", features.len());
+    info(format!("Downloaded {} features.", features.len()));
 
     let mut con = rusqlite::Connection::open(&out_path)
         .with_context(|| format!("Unable to create SQLite database: {}", out_path.display()))?;
