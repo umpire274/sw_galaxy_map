@@ -1,7 +1,7 @@
+use crate::ui::{info, warning};
+use crate::{db, normalize::normalize_text};
 use anyhow::Result;
 use rusqlite::Connection;
-
-use crate::{db, normalize::normalize_text};
 
 pub fn run(
     con: &Connection,
@@ -28,8 +28,14 @@ pub fn run(
     };
 
     if rows.is_empty() {
-        println!("No planets found within a radius of {} parsecs.", r);
+        warning(format!(
+            "No planets found within a radius of {} parsecs.",
+            r
+        ));
     } else {
+        println!();
+        info(format!("Found the following planets around {} parsecs:", r));
+        println!();
         println!("FID\tPlanet\tX\tY\tDistance(parsecs)");
         for hit in rows {
             println!(

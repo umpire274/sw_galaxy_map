@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.0] – 2026-01-15
+
+### Added
+
+- Unified colored console messaging system with semantic levels:
+    - info (cyan), success (green), warning (yellow), error (red).
+- Emoji support for user-facing messages (ℹ️ ✅ ⚠️ ❌).
+- Automatic color disabling when stdout is not a TTY.
+- Centralized UI output handling, decoupled from domain logic.
+
+### Changed
+
+- Refactored CLI output to use the new UI messaging layer.
+- Simplified console output by removing explicit log tags (e.g. [INFO], [ERROR]).
+- Improved consistency of user-facing messages across all commands.
+
+### Fixed
+
+- Resolved type mismatch issues related to colored output handling.
+- Ensured proper error propagation with `anyhow` while keeping UI concerns isolated.
+
+### Notes
+
+- Error handling continues to rely on `anyhow::Result` and `context()` internally.
+- Colored output is applied only at the CLI entrypoint level.
+
+---
+
 ## [0.2.0] – 2026-01-15
 
 ### Added

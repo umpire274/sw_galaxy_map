@@ -2,12 +2,14 @@ pub mod args;
 pub mod commands;
 
 use crate::provision::db_status::resolve_db_path;
+use crate::ui::warning;
 use anyhow::Result;
 use clap::Parser;
 use std::path::Path;
 
 pub fn run() -> Result<()> {
     let cli = args::Cli::parse();
+    println!();
 
     match cli.cmd {
         args::Commands::Db { cmd } => match cmd {
@@ -50,10 +52,11 @@ fn ensure_db_ready(db_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    eprintln!(
+    println!();
+    warning(format!(
         "Local database not found at: {}\nInitializing it now (this may take a moment)...",
         db_path.display()
-    );
+    ));
 
     crate::provision::db_init::run(Some(db_path.to_string_lossy().to_string()), false)
 }
