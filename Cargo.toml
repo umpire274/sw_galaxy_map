@@ -1,7 +1,38 @@
 [package]
 name = "sw_galaxy_map"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+authors = ["Alessandro Maestri <umpire274@gmail.com>"]
+description = "Command-line tool to query and explore the Star Wars galaxy using a local SQLite database"
+license = "MIT"
+readme = "README.md"
+
+homepage = "https://github.com/umpire274/sw_galaxy_map"
+repository = "https://github.com/umpire274/sw_galaxy_map"
+documentation = "https://github.com/umpire274/sw_galaxy_map"
+
+keywords = [
+    "star-wars",
+    "cli",
+    "sqlite",
+    "astronomy",
+    "galaxy"
+]
+
+categories = [
+    "command-line-utilities",
+    "database"
+]
+
+# Exclude non-essential files from crates.io packages
+exclude = [
+    "/target",
+    "/res/*.sqlite",
+    "/.github",
+    "/dev_tools",
+    "*.log"
+]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -9,3 +40,8 @@ clap = { version = "4.5.54", features = ["derive"] }
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 unicode-normalization = "0.1.25"
 regex = "1.12.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
