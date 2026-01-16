@@ -1,8 +1,8 @@
+use crate::normalize::normalize_text;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
-
-use crate::normalize::normalize_text;
+use sha2::{Digest, Sha256};
 
 pub struct BuildMeta {
     pub imported_at_utc: String,
@@ -54,6 +54,10 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
 
             X           REAL NOT NULL,
             Y           REAL NOT NULL,
+
+            -- v0.4.0
+            arcgis_hash TEXT NOT NULL,
+            deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
 
             Canon       INTEGER,
             Legends     INTEGER,
@@ -142,6 +146,7 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             p.status,
             p.ref
         FROM planets p
+        WHERE p.deleted = 0
         ORDER BY p.Planet COLLATE NOCASE;
 
         -- =========================
@@ -182,7 +187,7 @@ fn build_search_row(tx: &Transaction<'_>, fid: i64) -> Result<Option<SearchRow>>
                 group_concat(a.alias_norm, ' ') AS aliases_norm
             FROM planets p
             LEFT JOIN planet_aliases a ON a.planet_fid = p.FID
-            WHERE p.FID = ?
+            WHERE p.FID = ? AND p.deleted = 0
             GROUP BY p.FID
             "#,
             [fid],
@@ -225,6 +230,57 @@ fn build_search_row(tx: &Transaction<'_>, fid: i64) -> Result<Option<SearchRow>>
     }))
 }
 
+fn compute_arcgis_hash(a: &Value) -> String {
+    // Build a canonical JSON string by extracting fields in a fixed order.
+    // This avoids hash changes due to map ordering or unrelated ArcGIS properties.
+    let keys = [
+        "FID",
+        "Planet",
+        "Region",
+        "Sector",
+        "System",
+        "Grid",
+        "X",
+        "Y",
+        "Canon",
+        "Legends",
+        "zm",
+        "name0",
+        "name1",
+        "name2",
+        "lat",
+        "long",
+        "ref",
+        "status",
+        "CRegion",
+        "CRegion_li",
+    ];
+
+    let mut s = String::new();
+    for k in keys {
+        s.push_str(k);
+        s.push('=');
+
+        // Normalize values:
+        // - null/missing -> empty
+        // - strings -> trimmed
+        // - numbers -> stable string
+        match a.get(k) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(v)) => s.push_str(v.trim()),
+            Some(Value::Number(n)) => s.push_str(&n.to_string()),
+            Some(Value::Bool(b)) => s.push_str(if *b { "1" } else { "0" }),
+            Some(other) => s.push_str(&other.to_string()),
+        }
+
+        s.push('\n');
+    }
+
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    hex::encode(h.finalize())
+}
+
 fn rebuild_planet_search(tx: &Transaction<'_>) -> Result<()> {
     tx.execute("DELETE FROM planet_search", [])?;
 
@@ -243,7 +299,7 @@ fn rebuild_planet_search(tx: &Transaction<'_>) -> Result<()> {
         "#,
     )?;
 
-    let mut q = tx.prepare("SELECT FID FROM planets")?;
+    let mut q = tx.prepare("SELECT FID FROM planets WHERE deleted = 0")?;
     let fids = q.query_map([], |r| r.get::<_, i64>(0))?;
 
     for fid in fids {
@@ -288,16 +344,25 @@ pub fn insert_all(
     meta_upsert(&tx, "dataset_version", &meta.dataset_version)?;
     meta_upsert(&tx, "importer_version", &meta.importer_version)?;
     meta_upsert(&tx, "fts_enabled", if enable_fts { "1" } else { "0" })?;
+    meta_upsert(&tx, "schema_version", "4")?;
 
     {
         let mut stmt = tx.prepare(
             r#"
             INSERT INTO planets(
                 FID, Planet, planet_norm, Region, Sector, System, Grid,
-                X, Y, Canon, Legends, zm, name0, name1, name2, lat, long, ref, status, CRegion, CRegion_li
+                X, Y,
+                arcgis_hash, deleted,
+                Canon, Legends, zm,
+                name0, name1, name2,
+                lat, long, ref, status, CRegion, CRegion_li
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+                ?8, ?9,
+                ?10, 0,
+                ?11, ?12, ?13,
+                ?14, ?15, ?16,
+                ?17, ?18, ?19, ?20, ?21, ?22
             )
             "#,
         )?;
@@ -334,6 +399,7 @@ pub fn insert_all(
             let get_s = |k: &str| a.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
             let get_i = |k: &str| a.get(k).and_then(|v| v.as_i64());
             let get_f = |k: &str| a.get(k).and_then(|v| v.as_f64());
+            let arcgis_hash = compute_arcgis_hash(a);
 
             stmt.execute(params![
                 fid,
@@ -345,6 +411,7 @@ pub fn insert_all(
                 get_s("Grid"),
                 x,
                 y,
+                arcgis_hash,
                 get_i("Canon"),
                 get_i("Legends"),
                 get_i("zm"),
@@ -398,9 +465,34 @@ fn rebuild_planets_fts(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO planets_fts(planet_fid, search_norm)
-        SELECT planet_fid, search_norm FROM planet_search
+        SELECT s.planet_fid, s.search_norm
+        FROM planet_search s
+        JOIN planets p ON p.FID = s.planet_fid
+        WHERE p.deleted = 0
         "#,
         [],
     )?;
     Ok(())
+}
+
+pub(crate) fn rebuild_planet_search_public(tx: &Transaction<'_>) -> Result<()> {
+    rebuild_planet_search(tx)
+}
+
+pub(crate) fn rebuild_planets_fts_if_enabled(tx: &Transaction<'_>) -> Result<()> {
+    let enabled: Option<String> = tx
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'fts_enabled'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if matches!(enabled.as_deref(), Some("1")) {
+        rebuild_planets_fts(tx)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn meta_upsert_public(con: &Connection, key: &str, value: &str) -> Result<()> {
+    meta_upsert(con, key, value)
 }

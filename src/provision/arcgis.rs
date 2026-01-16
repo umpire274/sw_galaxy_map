@@ -7,11 +7,31 @@ const LAYER_URL: &str =
 
 #[derive(Debug, Deserialize)]
 pub struct LayerInfo {
-    #[serde(rename = "serviceItemId", default)]
+    #[serde(rename = "serviceItemId")]
     pub service_item_id: String,
 
-    #[serde(rename = "maxRecordCount", default)]
+    #[serde(rename = "maxRecordCount")]
     pub max_record_count: i64,
+
+    // Optional fields (safe if missing)
+    #[serde(rename = "currentVersion")]
+    pub current_version: Option<f64>,
+
+    #[serde(rename = "editingInfo")]
+    pub editing_info: Option<EditingInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EditingInfo {
+    #[serde(rename = "lastEditDate")]
+    pub last_edit_date: Option<i64>,
+
+    // Optional: keep for future use
+    #[serde(rename = "schemaLastEditDate")]
+    pub schema_last_edit_date: Option<i64>,
+
+    #[serde(rename = "dataLastEditDate")]
+    pub data_last_edit_date: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

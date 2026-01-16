@@ -130,7 +130,7 @@ fn search_planets_like(
             SELECT p.FID, p.Planet
             FROM planet_search s
             JOIN planets p ON p.FID = s.planet_fid
-            WHERE s.search_norm LIKE ?1
+            WHERE p.deleted = 0 AND s.search_norm LIKE ?1
             ORDER BY p.Planet COLLATE NOCASE
             LIMIT ?2
             "#,
@@ -163,7 +163,7 @@ fn search_planets_fts(
             SELECT p.FID, p.Planet
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
-            WHERE planets_fts MATCH ?1
+            WHERE p.deleted = 0 AND planets_fts MATCH ?1
             ORDER BY bm25(planets_fts)
             LIMIT ?2
             "#,
