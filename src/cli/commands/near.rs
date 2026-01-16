@@ -1,5 +1,6 @@
+use crate::db::queries::{find_planet_for_info, near_planets, near_planets_excluding_fid};
+use crate::normalize::normalize_text;
 use crate::ui::{info, warning};
-use crate::{db, normalize::normalize_text};
 use anyhow::Result;
 use rusqlite::Connection;
 
@@ -13,18 +14,20 @@ pub fn run(
 ) -> Result<()> {
     let rows = if let Some(planet_name) = planet {
         let pn = normalize_text(&planet_name);
-        let p = db::get_planet_by_norm(con, &pn)?;
+        let p = match find_planet_for_info(con, &pn)? {
+            Some(p) => p,
+            None => {
+                anyhow::bail!("No planet found matching '{}'", planet_name);
+            }
+        };
 
-        println!(
-            "Center: {} (X={}, Y={}), radius={} parsecs",
-            p.planet, p.x, p.y, r
-        );
+        println!("Center: {} (X={}, Y={})", p.planet, p.x, p.y);
 
-        db::near_planets_excluding_fid(con, p.fid, p.x, p.y, r, limit)?
+        near_planets_excluding_fid(con, p.fid, p.x, p.y, r, limit)?
     } else {
         let x = x.ok_or_else(|| anyhow::anyhow!("You must specify --x if --planet is not used"))?;
         let y = y.ok_or_else(|| anyhow::anyhow!("You must specify --y if --planet is not used"))?;
-        db::near_planets(con, x, y, r, limit)?
+        near_planets(con, x, y, r, limit)?
     };
 
     if rows.is_empty() {
@@ -34,7 +37,7 @@ pub fn run(
         ));
     } else {
         println!();
-        info(format!("Found the following planets around {} parsecs:", r));
+        info(format!("Found the following planets within {} parsecs:", r));
         println!();
         println!("FID\tPlanet\tX\tY\tDistance(parsecs)");
         for hit in rows {

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## [0.4.1] – 2026-01-16
+
+### Changed
+
+- Refactored the database layer to consolidate all planet-related queries into `db/queries.rs`.
+- Removed duplicated and legacy planet lookup logic from the former `db.rs` (now `db/core.rs`).
+- Switched `Planet` row mapping to column-name based access (`row.get("...")`) for improved robustness.
+- Standardized SQL queries using canonical column aliases shared across direct and alias-based lookups.
+- Reorganized the `db` module structure (`db/mod.rs`, `db/core.rs`, `db/queries.rs`) for better maintainability.
+
+### Added
+
+- Added a derived Star Wars Fandom information URL for planets, exposed via `Planet::info_planet_url()`.
+- Included the Fandom URL in the output of the `info` command.
+
+### Fixed
+
+- Fixed invalid column name errors caused by inconsistent SQL aliases (`ref` vs `reference`).
+- Resolved compilation issues related to mixed `anyhow::Result` / `rusqlite::Result` usage in query closures.
+- Fixed all Clippy warnings, ensuring a clean `cargo clippy -- -D warnings` run.
+
+### Internal
+
+- Improved separation of concerns between DB connection/setup logic and query logic.
+- Reduced the risk of future SQL drift by enforcing a single source of truth for planet queries.
+
+---
+
 ## v0.4.0 – Incremental database updates
 
 ### Added

@@ -1,13 +1,18 @@
+use crate::db::queries::{find_planet_for_info, get_aliases};
+use crate::normalize::normalize_text;
+use crate::ui::info;
 use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::ui::info;
-use crate::{db, normalize::normalize_text};
-
 pub fn run(con: &Connection, planet: String) -> Result<()> {
     let pn = normalize_text(&planet);
-    let p = db::get_planet_by_norm(con, &pn)?;
-    let aliases = db::get_aliases(con, p.fid)?;
+    let p = match find_planet_for_info(con, &pn)? {
+        Some(p) => p,
+        None => {
+            anyhow::bail!("No planet found matching '{}'", planet);
+        }
+    };
+    let aliases = get_aliases(con, p.fid)?;
 
     info("Planet Information");
     println!();
@@ -64,6 +69,8 @@ pub fn run(con: &Connection, planet: String) -> Result<()> {
             println!("  - {} ({})", a.alias, src);
         }
     }
+
+    println!("Info about planet: {}", p.info_planet_url());
 
     Ok(())
 }
