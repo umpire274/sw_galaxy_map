@@ -54,6 +54,12 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DbCommands,
     },
+
+    /// Manage waypoint catalog
+    Waypoint {
+        #[command(subcommand)]
+        cmd: WaypointCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -86,4 +92,50 @@ pub enum DbCommands {
         #[arg(long, default_value_t = 10)]
         stats_limit: usize,
     },
+    Migrate,
+}
+
+#[derive(Subcommand)]
+pub enum WaypointCmd {
+    /// Add a new waypoint
+    Add {
+        /// Waypoint name (unique, human friendly)
+        name: String,
+
+        /// X coordinate (parsec)
+        #[arg(allow_hyphen_values = true)]
+        x: f64,
+
+        /// Y coordinate (parsec)
+        #[arg(allow_hyphen_values = true)]
+        y: f64,
+
+        /// Waypoint kind (manual, junction, nav_buoy, computed, ...)
+        #[arg(long, default_value = "manual")]
+        kind: String,
+
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+    },
+
+    /// List waypoints
+    List {
+        /// Max rows (default: 50)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+
+        /// Offset (default: 0)
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
+
+    /// Show waypoint details by name (normalized) or by id
+    Show {
+        /// Waypoint name (e.g. "Corellian Junction") or numeric id (e.g. "12")
+        key: String,
+    },
+
+    /// Delete waypoint by id
+    Delete { id: i64 },
 }

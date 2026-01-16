@@ -1,7 +1,8 @@
 use crate::db::has_table;
-use crate::model::{AliasRow, NearHit, Planet};
+use crate::model::{AliasRow, NearHit, Planet, Waypoint};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params}; // adatta: crate::models::Planet ecc.
+use rusqlite::{Connection, OptionalExtension, Row, params};
+// adatta: crate::models::Planet ecc.
 
 const PLANET_SELECT_CANON: &str = r#"
   p.FID         AS fid,
@@ -246,4 +247,111 @@ pub fn near_planets_excluding_fid(
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
     Ok(rows)
+}
+
+const WAYPOINT_SELECT: &str = r#"
+  w.id         AS id,
+  w.name       AS name,
+  w.name_norm  AS name_norm,
+  w.x          AS x,
+  w.y          AS y,
+  w.kind       AS kind,
+  w.note       AS note,
+  w.created_at AS created_at,
+  w.updated_at AS updated_at
+"#;
+
+fn waypoint_from_row(r: &Row<'_>) -> rusqlite::Result<Waypoint> {
+    Ok(Waypoint {
+        id: r.get("id")?,
+        name: r.get("name")?,
+        name_norm: r.get("name_norm")?,
+        x: r.get("x")?,
+        y: r.get("y")?,
+        kind: r.get("kind")?,
+        note: r.get("note")?,
+        created_at: r.get("created_at")?,
+        updated_at: r.get("updated_at")?,
+    })
+}
+
+pub fn insert_waypoint(
+    con: &Connection,
+    name: &str,
+    name_norm: &str,
+    x: f64,
+    y: f64,
+    kind: &str,
+    note: Option<&str>,
+) -> Result<i64> {
+    con.execute(
+        r#"
+        INSERT INTO waypoints (name, name_norm, x, y, kind, note)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+        params![name, name_norm, x, y, kind, note],
+    )?;
+
+    Ok(con.last_insert_rowid())
+}
+
+pub fn find_waypoint_by_norm(con: &Connection, name_norm: &str) -> Result<Option<Waypoint>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM waypoints w
+        WHERE w.name_norm = ?1
+        LIMIT 1
+        "#,
+        select = WAYPOINT_SELECT
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let wp = stmt.query_row([name_norm], waypoint_from_row).optional()?;
+    Ok(wp)
+}
+
+pub fn list_waypoints(con: &Connection, limit: usize, offset: usize) -> Result<Vec<Waypoint>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM waypoints w
+        ORDER BY w.name COLLATE NOCASE
+        LIMIT ?1 OFFSET ?2
+        "#,
+        select = WAYPOINT_SELECT
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit as i64, offset as i64], waypoint_from_row)?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn delete_waypoint(con: &Connection, id: i64) -> Result<usize> {
+    let n = con.execute("DELETE FROM waypoints WHERE id = ?1", [id])?;
+    Ok(n)
+}
+
+pub fn find_waypoint_by_id(con: &Connection, id: i64) -> Result<Option<Waypoint>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM waypoints w
+        WHERE w.id = ?1
+        LIMIT 1
+        "#,
+        select = WAYPOINT_SELECT
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let wp = stmt.query_row([id], waypoint_from_row).optional()?;
+    Ok(wp)
 }

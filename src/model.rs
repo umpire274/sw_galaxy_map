@@ -42,6 +42,28 @@ pub struct NearHit {
     pub distance: f64,
 }
 
+#[derive(Debug)]
+pub struct Waypoint {
+    pub id: i64,
+    pub name: String,
+    pub name_norm: String,
+    pub x: f64,
+    pub y: f64,
+    pub kind: String,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+}
+
+impl Waypoint {
+    pub fn fmt_short(&self) -> String {
+        format!(
+            "#{:<4} {:<24} ({:>10.3}, {:>10.3}) kind={}",
+            self.id, self.name, self.x, self.y, self.kind
+        )
+    }
+}
+
 impl Planet {
     pub fn from_row(r: &Row<'_>) -> SqlResult<Self> {
         Ok(Self {
