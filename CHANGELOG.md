@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## v0.4.0 – Incremental database updates
+
+### Added
+
+- New `db update` command with fully incremental update logic.
+- Hash-based comparison (`arcgis_hash`) to detect changed planets.
+- Soft-delete support via `deleted` column on `planets`.
+- Optional `--prune` flag to permanently remove deleted planets.
+- `--dry-run` mode to preview changes without writing to disk.
+- `--stats` flag to display update statistics and top changed FIDs.
+- Extended `db status` with ArcGIS layer metadata and edit timestamps.
+- Automatic FTS5 rebuild after updates (when enabled).
+
+### Improved
+
+- More robust handling of invalid ArcGIS rows.
+- Clearer CLI output with colored messages and counters.
+- Consistent metadata tracking for update mode and pruning.
+
+### Internal
+
+- Schema version bump.
+- Incremental update logic isolated and transaction-safe.
+- Shared normalization and hash computation reused across init/update.
+
+---
+
 ## [0.3.0] – 2026-01-15
 
 ### Added

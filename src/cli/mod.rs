@@ -15,6 +15,15 @@ pub fn run() -> Result<()> {
         args::Commands::Db { cmd } => match cmd {
             args::DbCommands::Init { out, force } => crate::provision::db_init::run(out, force),
             args::DbCommands::Status => crate::provision::db_status::run(cli.db),
+            args::DbCommands::Update {
+                prune,
+                dry_run,
+                stats,
+                stats_limit,
+            } => {
+                let mut con = open_db_for_commands(cli.db.clone())?;
+                crate::provision::db_update::run(&mut con, prune, dry_run, stats, stats_limit)
+            }
         },
 
         args::Commands::Search { query, limit } => {
@@ -44,7 +53,9 @@ fn open_db_for_commands(db_arg: Option<String>) -> Result<rusqlite::Connection> 
     let db_path = resolve_db_path(db_arg)?;
     ensure_db_ready(&db_path)?;
 
-    crate::db::open_db(&db_path.to_string_lossy())
+    let mut con = crate::db::open_db(&db_path.to_string_lossy())?;
+    crate::provision::migrate::run(&mut con)?;
+    Ok(con)
 }
 
 fn ensure_db_ready(db_path: &Path) -> Result<()> {

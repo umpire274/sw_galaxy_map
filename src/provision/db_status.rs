@@ -16,7 +16,7 @@ fn get_meta(con: &Connection, key: &str) -> Result<Option<String>> {
         r.get::<_, String>(0)
     })
     .optional()
-    .context("Failed to read meta")
+    .with_context(|| format!("Failed to read meta key: {}", key))
 }
 
 fn count(con: &Connection, table: &str) -> Result<i64> {
@@ -64,49 +64,93 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    let meta = fs::metadata(&db_path).context("Unable to read database file metadata")?;
+    let meta_fs = fs::metadata(&db_path).context("Unable to read database file metadata")?;
     success("Status: OK");
-    println!("Size: {} bytes", meta.len());
+    println!("Size: {} bytes", meta_fs.len());
 
     let con = Connection::open(&db_path)
         .with_context(|| format!("Unable to open database: {}", db_path.display()))?;
 
-    // Meta (best-effort: missing keys are fine)
-    let imported_at = get_meta(&con, "imported_at_utc")?;
-    let source_id = get_meta(&con, "source_serviceItemId")?;
-    let dataset_version = get_meta(&con, "dataset_version")?;
-    let importer_version = get_meta(&con, "importer_version")?;
-    let fts_enabled = get_meta(&con, "fts_enabled")?;
+    // If meta table is missing, this isn't a valid DB for our app (or it's corrupted).
+    let meta_table_ok = has_table(&con, "meta")?;
+    if !meta_table_ok {
+        warning("Warning: table 'meta' is missing (database not initialized or schema is invalid)");
+        return Ok(());
+    }
 
+    // --- Meta (ordered, best-effort)
     println!();
     println!("Meta:");
-    println!(
-        "  imported_at_utc: {}",
-        imported_at.as_deref().unwrap_or("-")
-    );
-    println!(
-        "  source_serviceItemId: {}",
-        source_id.as_deref().unwrap_or("-")
-    );
-    println!(
-        "  dataset_version: {}",
-        dataset_version.as_deref().unwrap_or("-")
-    );
-    println!(
-        "  importer_version: {}",
-        importer_version.as_deref().unwrap_or("-")
-    );
-    println!("  fts_enabled: {}", fts_enabled.as_deref().unwrap_or("-"));
-    let fts_table = has_table(&con, "planets_fts")?;
+    for k in [
+        "schema_version",
+        "imported_at_utc",
+        "last_update_utc",
+        "source_serviceItemId",
+        "source_currentVersion",
+        "source_maxRecordCount",
+        "source_lastEditDate",
+        "source_schemaLastEditDate",
+        "source_dataLastEditDate",
+        "dataset_version",
+        "importer_version",
+        "update_mode",
+        "prune_used",
+        "fts_enabled",
+    ] {
+        if let Some(v) = get_meta(&con, k)? {
+            match k {
+                "source_lastEditDate" => print_epoch_millis_iso(&con, "source_lastEditDate")?,
+                "source_schemaLastEditDate" => {
+                    print_epoch_millis_iso(&con, "source_schemaLastEditDate")?
+                }
+                "source_dataLastEditDate" => {
+                    print_epoch_millis_iso(&con, "source_dataLastEditDate")?
+                }
+                _ => {
+                    println!("  {}: {}", k, v);
+                }
+            }
+        }
+    }
 
-    // Counts
+    // --- Counts
     println!();
     println!("Counts:");
-    println!("  planets: {}", count(&con, "planets")?);
-    println!("  planet_aliases: {}", count(&con, "planet_aliases")?);
-    println!("  planet_search: {}", count(&con, "planet_search")?);
+    let planets_total = count(&con, "planets")?;
+    println!("  planets: {}", planets_total);
 
-    // View check
+    // If 'deleted' column exists, show active vs deleted breakdown.
+    // We detect by trying a query; if it fails, we just skip the breakdown.
+    let active = con
+        .query_row("SELECT COUNT(*) FROM planets WHERE deleted = 0", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional();
+    match active {
+        Ok(Some(active_n)) => {
+            let deleted_n = planets_total - active_n;
+            println!("  active_planets (deleted=0): {}", active_n);
+            println!("  deleted_planets (deleted=1): {}", deleted_n);
+        }
+        _ => {
+            // older schema: no 'deleted' column or query failed; ignore
+        }
+    }
+
+    // Related tables (may not exist in partial/old DBs)
+    if has_table(&con, "planet_aliases")? {
+        println!("  planet_aliases: {}", count(&con, "planet_aliases")?);
+    } else {
+        println!("  planet_aliases: -");
+    }
+
+    if has_table(&con, "planet_search")? {
+        println!("  planet_search: {}", count(&con, "planet_search")?);
+    } else {
+        println!("  planet_search: -");
+    }
+
+    // --- Schema checks
     println!();
     println!("Schema:");
     println!(
@@ -117,12 +161,18 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
             "missing"
         }
     );
+
+    // --- FTS checks
     println!();
     println!("FTS:");
+    let fts_enabled = get_meta(&con, "fts_enabled")?;
+    let meta_flag = matches!(fts_enabled.as_deref(), Some("1"));
     println!(
         "  meta.fts_enabled: {}",
         fts_enabled.as_deref().unwrap_or("-")
     );
+
+    let fts_table = has_table(&con, "planets_fts")?;
     println!(
         "  planets_fts table: {}",
         if fts_table { "present" } else { "missing" }
@@ -132,13 +182,21 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
         println!("  planets_fts rows: {}", count(&con, "planets_fts")?);
     }
 
-    // Mismatch hint (best-effort)
-    let meta_flag = matches!(fts_enabled.as_deref(), Some("1"));
     if meta_flag && !fts_table {
-        warning("  warning: meta says FTS is enabled but planets_fts table is missing");
+        warning("warning: meta says FTS is enabled but planets_fts table is missing");
     } else if !meta_flag && fts_table {
-        warning("  warning: planets_fts exists but meta says FTS is disabled");
+        warning("warning: planets_fts exists but meta says FTS is disabled");
     }
 
+    Ok(())
+}
+
+fn print_epoch_millis_iso(con: &Connection, key: &str) -> Result<()> {
+    if let Some(ms) = get_meta(con, key)?
+        && let Ok(ms) = ms.parse::<i64>()
+        && let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+    {
+        println!("  {}_iso: {}", key, dt.to_rfc3339());
+    }
     Ok(())
 }

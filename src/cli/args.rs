@@ -71,4 +71,19 @@ pub enum DbCommands {
 
     /// Show local database status (path, meta, counts)
     Status,
+    Update {
+        /// Permanently remove planets marked as deleted
+        #[arg(long)]
+        prune: bool,
+
+        /// Perform a dry run without modifying the database
+        #[arg(long)]
+        dry_run: bool,
+
+        #[arg(long)]
+        stats: bool,
+
+        #[arg(long, default_value_t = 10)]
+        stats_limit: usize,
+    },
 }
