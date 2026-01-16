@@ -90,6 +90,33 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_planets_xy          ON planets(X, Y);
 
         -- =========================
+        -- WAYPOINTS (catalog)
+        -- =========================
+        DROP TABLE IF EXISTS waypoints;
+
+        CREATE TABLE waypoints (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            name_norm  TEXT NOT NULL,
+            x          REAL NOT NULL,
+            y          REAL NOT NULL,
+            kind       TEXT NOT NULL DEFAULT 'manual',
+            note       TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_name_norm ON waypoints(name_norm);
+        CREATE INDEX IF NOT EXISTS idx_waypoints_xy ON waypoints(x, y);
+
+        CREATE TRIGGER IF NOT EXISTS trg_waypoints_updated_at
+        AFTER UPDATE ON waypoints
+        FOR EACH ROW
+        BEGIN
+            UPDATE waypoints SET updated_at = datetime('now') WHERE id = OLD.id;
+        END;
+
+        -- =========================
         -- ALIASES (N per planet)
         -- =========================
         DROP TABLE IF EXISTS planet_aliases;

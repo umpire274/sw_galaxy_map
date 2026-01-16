@@ -3,11 +3,11 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 use std::collections::HashSet;
 
-use crate::normalize::normalize_text;
-use crate::provision::arcgis;
-use crate::provision::build_sqlite::{
+use crate::db::provision::{
     meta_upsert_public, rebuild_planet_search_public, rebuild_planets_fts_if_enabled,
 };
+use crate::normalize::normalize_text;
+use crate::provision::arcgis;
 use crate::ui;
 
 // ----------------------------
@@ -29,7 +29,7 @@ struct ChangeEvent {
 }
 
 fn compute_arcgis_hash(a: &Value) -> String {
-    // Must match the one used in build_sqlite.rs (keep in sync)
+    // Must match the one used in provision (keep in sync)
     let keys = [
         "FID",
         "Planet",
@@ -443,11 +443,7 @@ pub fn run(
         rebuild_planets_fts_if_enabled(&tx)?;
 
         // Update meta
-        meta_upsert_public(
-            &tx,
-            "last_update_utc",
-            &crate::provision::time::now_utc_iso(),
-        )?;
+        meta_upsert_public(&tx, "last_update_utc", &crate::utils::time::now_utc_iso())?;
         meta_upsert_public(&tx, "update_mode", "incremental")?;
         meta_upsert_public(&tx, "prune_used", if prune { "1" } else { "0" })?;
 

@@ -7,9 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-# Changelog
+## [0.5.0] – 2026-01-16
 
-All notable changes to this project are documented in this file.
+### Added
+
+- Introduced the Waypoints catalog (schema v5) to store reusable navigation waypoints.
+- Added waypoint CRUD queries (insert/find/list/delete) using column-name based mapping.
+- Added CLI `waypoint` command group:
+    - `waypoint add`
+    - `waypoint list`
+    - `waypoint show`
+    - `waypoint delete`
+
+### Changed
+
+- Moved DB-related sources under `src/db/` for clearer separation of concerns (provisioning vs database layer).
+- Improved schema migration workflow with incremental migration steps and user-facing progress messages.
+
+### Fixed
+
+- Fixed schema migration correctness issues (ensuring migrations are applied before updating `meta.schema_version`).
+- Fixed CLI parsing for negative coordinate values in waypoint commands.
+- Resolved Clippy warnings to keep `cargo clippy -- -D warnings` clean.
+
+---
 
 ## [0.4.1] – 2026-01-16
 

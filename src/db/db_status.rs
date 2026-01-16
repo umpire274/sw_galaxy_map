@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub fn resolve_db_path(db_arg: Option<String>) -> Result<PathBuf> {
     Ok(match db_arg {
         Some(p) => PathBuf::from(p),
-        None => crate::provision::paths::default_db_path()?,
+        None => crate::db::paths::default_db_path()?,
     })
 }
 
