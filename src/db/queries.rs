@@ -1,86 +1,75 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, params};
-
+use crate::db::has_table;
 use crate::model::{AliasRow, NearHit, Planet};
+use anyhow::{Context, Result};
+use rusqlite::{Connection, OptionalExtension, params}; // adatta: crate::models::Planet ecc.
 
-pub fn open_db(path: &str) -> Result<Connection> {
-    let con = Connection::open(path).with_context(|| format!("Unable to open database: {path}"))?;
-    Ok(con)
-}
+const PLANET_SELECT_CANON: &str = r#"
+  p.FID         AS fid,
+  p.Planet      AS planet,
+  p.planet_norm AS planet_norm,
+  p.Region      AS region,
+  p.Sector      AS sector,
+  p.System      AS system,
+  p.Grid        AS grid,
+  p.X           AS x,
+  p.Y           AS y,
+  p.Canon       AS canon,
+  p.Legends     AS legends,
+  p.zm          AS zm,
+  p.name0       AS name0,
+  p.name1       AS name1,
+  p.name2       AS name2,
+  p.lat         AS lat,
+  p.long        AS long,
+  p.ref         AS reference,
+  p.status      AS status,
+  p.CRegion     AS c_region,
+  p.CRegion_li  AS c_region_li
+"#;
 
-pub fn has_table(con: &Connection, table: &str) -> Result<bool> {
-    let n: i64 = con.query_row(
+pub fn find_planet_by_norm(con: &Connection, planet_norm: &str) -> Result<Option<Planet>> {
+    let sql = format!(
         r#"
-        SELECT COUNT(*)
-        FROM sqlite_master
-        WHERE type = 'table' AND name = ?1
+        SELECT
+          {select}
+        FROM planets p
+        WHERE p.planet_norm = ?1
+        LIMIT 1
         "#,
-        [table],
-        |r| r.get(0),
-    )?;
-    Ok(n > 0)
+        select = PLANET_SELECT_CANON
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let planet = stmt.query_row([planet_norm], Planet::from_row).optional()?;
+
+    Ok(planet)
 }
 
-pub fn get_planet_by_norm(con: &Connection, planet_norm: &str) -> Result<Planet> {
-    // 1) Match diretto sul nome normalizzato
-    if let Some(p) = get_planet_by_norm_direct(con, planet_norm)? {
-        return Ok(p);
-    }
+pub fn find_planet_by_alias_norm(con: &Connection, alias_norm: &str) -> Result<Option<Planet>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM planet_aliases a
+        JOIN planets p ON p.FID = a.planet_fid
+        WHERE a.alias_norm = ?1
+        ORDER BY p.Planet COLLATE NOCASE
+        LIMIT 1
+        "#,
+        select = PLANET_SELECT_CANON
+    );
 
-    // 2) Fallback: match su alias_norm
-    if let Some(p) = get_planet_by_alias_norm(con, planet_norm)? {
-        return Ok(p);
-    }
+    let mut stmt = con.prepare(&sql)?;
+    let planet = stmt.query_row([alias_norm], Planet::from_row).optional()?;
 
-    bail!("Planet not found: {}", planet_norm)
+    Ok(planet)
 }
 
-fn get_planet_by_norm_direct(con: &Connection, planet_norm: &str) -> Result<Option<Planet>> {
-    let mut stmt = con
-        .prepare(
-            r#"
-            SELECT
-                FID, Planet, planet_norm, Region, Sector, System, Grid,
-                X, Y, Canon, Legends, zm, name0, name1, name2, lat, long,
-                ref, status, CRegion, CRegion_li
-            FROM planets
-            WHERE planet_norm = ?1
-            LIMIT 1
-            "#,
-        )
-        .context("Failed to prepare planet lookup query")?;
-
-    let mut rows = stmt.query([planet_norm])?;
-    if let Some(r) = rows.next()? {
-        Ok(Some(Planet::from_row(r)?))
-    } else {
-        Ok(None)
+pub fn find_planet_for_info(con: &Connection, key_norm: &str) -> Result<Option<Planet>> {
+    if let Some(p) = find_planet_by_norm(con, key_norm)? {
+        return Ok(Some(p));
     }
-}
-
-fn get_planet_by_alias_norm(con: &Connection, alias_norm: &str) -> Result<Option<Planet>> {
-    let mut stmt = con
-        .prepare(
-            r#"
-            SELECT
-                p.FID, p.Planet, p.planet_norm, p.Region, p.Sector, p.System, p.Grid,
-                p.X, p.Y, p.Canon, p.Legends, p.zm, p.name0, p.name1, p.name2, p.lat, p.long,
-                p.ref, p.status, p.CRegion, p.CRegion_li
-            FROM planet_aliases a
-            JOIN planets p ON p.FID = a.planet_fid
-            WHERE a.alias_norm = ?1
-            ORDER BY p.Planet COLLATE NOCASE
-            LIMIT 1
-            "#,
-        )
-        .context("Failed to prepare alias lookup query")?;
-
-    let mut rows = stmt.query([alias_norm])?;
-    if let Some(r) = rows.next()? {
-        Ok(Some(Planet::from_row(r)?))
-    } else {
-        Ok(None)
-    }
+    find_planet_by_alias_norm(con, key_norm)
 }
 
 pub fn get_aliases(con: &Connection, fid: i64) -> Result<Vec<AliasRow>> {

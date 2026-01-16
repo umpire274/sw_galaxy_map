@@ -1,5 +1,6 @@
-use anyhow::Result;
-use rusqlite::Row;
+use rusqlite::{Result as SqlResult, Row};
+
+use crate::utils::wiki::fandom_planet_url;
 
 #[derive(Debug)]
 pub struct Planet {
@@ -42,29 +43,33 @@ pub struct NearHit {
 }
 
 impl Planet {
-    pub fn from_row(r: &Row<'_>) -> Result<Self> {
+    pub fn from_row(r: &Row<'_>) -> SqlResult<Self> {
         Ok(Self {
-            fid: r.get(0)?,
-            planet: r.get(1)?,
-            planet_norm: r.get(2)?,
-            region: r.get(3)?,
-            sector: r.get(4)?,
-            system: r.get(5)?,
-            grid: r.get(6)?,
-            x: r.get(7)?,
-            y: r.get(8)?,
-            canon: r.get(9)?,
-            legends: r.get(10)?,
-            zm: r.get(11)?,
-            name0: r.get(12)?,
-            name1: r.get(13)?,
-            name2: r.get(14)?,
-            lat: r.get(15)?,
-            long: r.get(16)?,
-            reference: r.get(17)?,
-            status: r.get(18)?,
-            c_region: r.get(19)?,
-            c_region_li: r.get(20)?,
+            fid: r.get("fid")?,
+            planet: r.get("planet")?,
+            planet_norm: r.get("planet_norm")?,
+            region: r.get("region")?,
+            sector: r.get("sector")?,
+            system: r.get("system")?,
+            grid: r.get("grid")?,
+            x: r.get("x")?,
+            y: r.get("y")?,
+            canon: r.get("canon")?,
+            legends: r.get("legends")?,
+            zm: r.get("zm")?,
+            name0: r.get("name0")?,
+            name1: r.get("name1")?,
+            name2: r.get("name2")?,
+            lat: r.get("lat")?,
+            long: r.get("long")?,
+            reference: r.get("reference")?,
+            status: r.get("status")?,
+            c_region: r.get("c_region")?,
+            c_region_li: r.get("c_region_li")?,
         })
+    }
+
+    pub fn info_planet_url(&self) -> String {
+        fandom_planet_url(&self.planet)
     }
 }
