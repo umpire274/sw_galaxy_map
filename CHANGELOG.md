@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.1] – 2026-01-19
+
+### 🚀 Routing Engine (in-memory, v1)
+
+- Implemented first working routing engine between two planets using Euclidean geometry.
+- Added incremental detour-based routing with obstacle avoidance.
+- Introduced waypoint-based route construction with iterative refinement.
+- Added scoring system for detour candidates, including:
+    - path length
+    - angular penalty
+    - backward movement penalty
+    - proximity penalty to other planets
+
+### 🧠 Collision Handling
+
+- Distinguished between:
+    - **hard collisions** (segment intersects obstacle interior)
+    - **endpoint collisions** (allowed for start/end planets).
+- Fixed false-positive collisions when arriving at destination planet.
+- Unified collision logic across detection and validation (`first_collision_on_segment` and `is_segment_safe`).
+
+### 🔍 Debug & Observability
+
+- Added detailed debug output for failed detour resolution, including:
+    - obstacle data
+    - closest-point metrics
+    - candidate waypoint diagnostics.
+- Improved internal diagnostics to support future visualization and persistence.
+
+### 🗺️ CLI
+
+- Added `route <FROM> <TO>` command (planet name or alias).
+- Integrated routing engine with database-backed planet resolution.
+- Added tunable routing parameters via CLI flags (safety, clearance, scoring weights).
+
+### 🧱 Internal Refactor
+
+- Separated routing logic into dedicated `routing` module.
+- Improved internal consistency and robustness of geometric primitives.
+- Prepared groundwork for waypoint persistence and multi-hop routing.
+
+---
+
 ## [0.5.0] – 2026-01-16
 
 ### Added

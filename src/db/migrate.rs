@@ -2,7 +2,7 @@ use crate::ui;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 fn column_exists(tx: &Transaction<'_>, table: &str, col: &str) -> Result<bool> {
     let sql = format!("PRAGMA table_info({})", table);
@@ -107,6 +107,55 @@ fn m_to_v5(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn m_to_v6(tx: &Transaction<'_>) -> Result<()> {
+    // 1) waypoints.fingerprint (ALTER TABLE must be conditional in SQLite)
+    if !column_exists(tx, "waypoints", "fingerprint")? {
+        tx.execute_batch(
+            r#"
+            ALTER TABLE waypoints ADD COLUMN fingerprint TEXT;
+            "#,
+        )
+        .context("Failed to add waypoints.fingerprint")?;
+    }
+
+    // 2) Index for fingerprint (unique only when present)
+    tx.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_fingerprint
+          ON waypoints(fingerprint)
+          WHERE fingerprint IS NOT NULL;
+        "#,
+    )
+    .context("Failed to create idx_waypoints_fingerprint")?;
+
+    // 3) N:N relation table waypoints <-> planets
+    tx.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS waypoint_planets (
+          waypoint_id INTEGER NOT NULL,
+          planet_fid  INTEGER NOT NULL,
+          role        TEXT NOT NULL DEFAULT 'anchor', -- anchor/avoid/near/cluster_member
+          distance    REAL,
+          PRIMARY KEY (waypoint_id, planet_fid),
+          FOREIGN KEY (waypoint_id) REFERENCES waypoints(id) ON DELETE CASCADE,
+          FOREIGN KEY (planet_fid)  REFERENCES planets(FID)  ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_planet
+          ON waypoint_planets(planet_fid);
+
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_waypoint
+          ON waypoint_planets(waypoint_id);
+
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_role
+          ON waypoint_planets(role);
+        "#,
+    )
+    .context("Failed to create waypoint_planets relation table/indexes")?;
+
+    Ok(())
+}
+
 /// Run schema migrations up to SCHEMA_VERSION.
 /// Idempotent and safe to call on every startup/open.
 pub fn run(con: &mut Connection) -> Result<()> {
@@ -149,6 +198,13 @@ pub fn run(con: &mut Connection) -> Result<()> {
             new_schema_version
         ))?;
         ui::success("Migration v4 → v5 completed");
+    }
+
+    if current < 6 {
+        ui::info("Applying migration: v5 → v6 (waypoint↔planet links + fingerprint)");
+        m_to_v6(&tx)?;
+        meta_upsert(&tx, "schema_version", "6")?;
+        ui::success("Migration v5 → v6 completed");
     }
 
     tx.commit().context("Failed to commit migration")?;

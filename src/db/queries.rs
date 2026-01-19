@@ -1,5 +1,5 @@
 use crate::db::has_table;
-use crate::model::{AliasRow, NearHit, Planet, Waypoint};
+use crate::model::{AliasRow, NearHit, Planet, Waypoint, WaypointPlanetLink};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 // adatta: crate::models::Planet ecc.
@@ -250,15 +250,16 @@ pub fn near_planets_excluding_fid(
 }
 
 const WAYPOINT_SELECT: &str = r#"
-  w.id         AS id,
-  w.name       AS name,
-  w.name_norm  AS name_norm,
-  w.x          AS x,
-  w.y          AS y,
-  w.kind       AS kind,
-  w.note       AS note,
-  w.created_at AS created_at,
-  w.updated_at AS updated_at
+  w.id          AS id,
+  w.name        AS name,
+  w.name_norm   AS name_norm,
+  w.x           AS x,
+  w.y           AS y,
+  w.kind        AS kind,
+  w.fingerprint AS fingerprint,
+  w.note        AS note,
+  w.created_at  AS created_at,
+  w.updated_at  AS updated_at
 "#;
 
 fn waypoint_from_row(r: &Row<'_>) -> rusqlite::Result<Waypoint> {
@@ -269,6 +270,7 @@ fn waypoint_from_row(r: &Row<'_>) -> rusqlite::Result<Waypoint> {
         x: r.get("x")?,
         y: r.get("y")?,
         kind: r.get("kind")?,
+        fingerprint: r.get("fingerprint")?,
         note: r.get("note")?,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
@@ -354,4 +356,237 @@ pub fn find_waypoint_by_id(con: &Connection, id: i64) -> Result<Option<Waypoint>
     let mut stmt = con.prepare(&sql)?;
     let wp = stmt.query_row([id], waypoint_from_row).optional()?;
     Ok(wp)
+}
+
+// ---------- Waypoint <-> Planet links ----------
+
+pub fn link_waypoint_to_planet(
+    con: &Connection,
+    waypoint_id: i64,
+    planet_fid: i64,
+    role: &str,
+    distance: Option<f64>,
+) -> Result<()> {
+    con.execute(
+        r#"
+        INSERT INTO waypoint_planets(waypoint_id, planet_fid, role, distance)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(waypoint_id, planet_fid) DO UPDATE SET
+          role=excluded.role,
+          distance=excluded.distance
+        "#,
+        params![waypoint_id, planet_fid, role, distance],
+    )?;
+    Ok(())
+}
+
+pub fn unlink_waypoint_from_planet(
+    con: &Connection,
+    waypoint_id: i64,
+    planet_fid: i64,
+) -> Result<usize> {
+    let n = con.execute(
+        "DELETE FROM waypoint_planets WHERE waypoint_id = ?1 AND planet_fid = ?2",
+        params![waypoint_id, planet_fid],
+    )?;
+    Ok(n)
+}
+
+pub fn delete_waypoint_links(con: &Connection, waypoint_id: i64) -> Result<usize> {
+    let n = con.execute(
+        "DELETE FROM waypoint_planets WHERE waypoint_id = ?1",
+        [waypoint_id],
+    )?;
+    Ok(n)
+}
+
+fn link_from_row(r: &Row<'_>) -> rusqlite::Result<WaypointPlanetLink> {
+    Ok(WaypointPlanetLink {
+        waypoint_id: r.get("waypoint_id")?,
+        planet_fid: r.get("planet_fid")?,
+        role: r.get("role")?,
+        distance: r.get("distance")?,
+    })
+}
+
+pub fn list_links_for_waypoint(
+    con: &Connection,
+    waypoint_id: i64,
+) -> Result<Vec<WaypointPlanetLink>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT
+          waypoint_id AS waypoint_id,
+          planet_fid  AS planet_fid,
+          role        AS role,
+          distance    AS distance
+        FROM waypoint_planets
+        WHERE waypoint_id = ?1
+        ORDER BY role, planet_fid
+        "#,
+    )?;
+
+    let rows = stmt.query_map([waypoint_id], link_from_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+#[allow(dead_code)]
+pub fn list_links_for_planet(con: &Connection, planet_fid: i64) -> Result<Vec<WaypointPlanetLink>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT
+          waypoint_id AS waypoint_id,
+          planet_fid  AS planet_fid,
+          role        AS role,
+          distance    AS distance
+        FROM waypoint_planets
+        WHERE planet_fid = ?1
+        ORDER BY role, waypoint_id
+        "#,
+    )?;
+
+    let rows = stmt.query_map([planet_fid], link_from_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+// ---------- List waypoints for a given planet ----------
+
+pub fn list_waypoints_for_planet(
+    con: &Connection,
+    planet_fid: i64,
+    role: Option<&str>, // filter optional
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<Waypoint>> {
+    // If role is provided, filter by role; else list all.
+    let sql = if role.is_some() {
+        format!(
+            r#"
+            SELECT {select}
+            FROM waypoint_planets wp
+            JOIN waypoints w ON w.id = wp.waypoint_id
+            WHERE wp.planet_fid = ?1 AND wp.role = ?2
+            ORDER BY w.name COLLATE NOCASE
+            LIMIT ?3 OFFSET ?4
+            "#,
+            select = WAYPOINT_SELECT
+        )
+    } else {
+        format!(
+            r#"
+            SELECT {select}
+            FROM waypoint_planets wp
+            JOIN waypoints w ON w.id = wp.waypoint_id
+            WHERE wp.planet_fid = ?1
+            ORDER BY w.name COLLATE NOCASE
+            LIMIT ?2 OFFSET ?3
+            "#,
+            select = WAYPOINT_SELECT
+        )
+    };
+
+    let mut stmt = con.prepare(&sql)?;
+
+    let rows = if let Some(role) = role {
+        stmt.query_map(
+            params![planet_fid, role, limit as i64, offset as i64],
+            waypoint_from_row,
+        )?
+    } else {
+        stmt.query_map(
+            params![planet_fid, limit as i64, offset as i64],
+            waypoint_from_row,
+        )?
+    };
+
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+#[allow(dead_code)]
+pub fn find_waypoint_by_fingerprint(con: &Connection, fp: &str) -> Result<Option<Waypoint>> {
+    let sql = format!(
+        r#"
+        SELECT {select}
+        FROM waypoints w
+        WHERE w.fingerprint = ?1
+        LIMIT 1
+        "#,
+        select = WAYPOINT_SELECT
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let wp = stmt.query_row([fp], waypoint_from_row).optional()?;
+    Ok(wp)
+}
+
+/// Insert a computed waypoint if not already present (by fingerprint).
+/// Returns (waypoint_id, created_new).
+#[allow(dead_code, clippy::too_many_arguments)]
+pub fn upsert_computed_waypoint(
+    con: &Connection,
+    name: &str,
+    name_norm: &str,
+    x: f64,
+    y: f64,
+    kind: &str, // e.g. "computed"
+    note: Option<&str>,
+    fingerprint: &str,
+) -> Result<(i64, bool)> {
+    if let Some(existing) = find_waypoint_by_fingerprint(con, fingerprint)? {
+        return Ok((existing.id, false));
+    }
+
+    con.execute(
+        r#"
+        INSERT INTO waypoints (name, name_norm, x, y, kind, note, fingerprint)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![name, name_norm, x, y, kind, note, fingerprint],
+    )?;
+
+    Ok((con.last_insert_rowid(), true))
+}
+
+pub fn list_planets_in_bbox(
+    con: &Connection,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+    limit: usize,
+) -> Result<Vec<(i64, String, f64, f64)>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT FID, Planet, X, Y
+        FROM planets
+        WHERE deleted = 0
+          AND X BETWEEN ?1 AND ?2
+          AND Y BETWEEN ?3 AND ?4
+        ORDER BY Planet COLLATE NOCASE
+        LIMIT ?5
+        "#,
+    )?;
+
+    let rows = stmt.query_map(
+        rusqlite::params![min_x, max_x, min_y, max_y, limit as i64],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }

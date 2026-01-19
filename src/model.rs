@@ -50,6 +50,7 @@ pub struct Waypoint {
     pub x: f64,
     pub y: f64,
     pub kind: String,
+    pub fingerprint: Option<String>,
     pub note: Option<String>,
     pub created_at: String,
     pub updated_at: Option<String>,
@@ -62,6 +63,14 @@ impl Waypoint {
             self.id, self.name, self.x, self.y, self.kind
         )
     }
+}
+
+#[derive(Debug)]
+pub struct WaypointPlanetLink {
+    pub waypoint_id: i64,
+    pub planet_fid: i64,
+    pub role: String,
+    pub distance: Option<f64>,
 }
 
 impl Planet {

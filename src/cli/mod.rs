@@ -55,6 +55,11 @@ pub fn run() -> Result<()> {
             let con = open_db_for_commands(cli.db)?;
             commands::waypoints::run_waypoint(&con, &cmd)
         }
+
+        args::Commands::Route(args) => {
+            let con = open_db_for_commands(cli.db)?;
+            commands::route::run(&con, &args)
+        }
     }
 }
 
