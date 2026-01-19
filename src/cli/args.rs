@@ -241,8 +241,18 @@ pub struct RouteComputeArgs {
     /// Destination planet name (or alias)
     pub to: String,
 
-    /// Safety radius (parsec) used as obstacle radius (planets are treated as circles)
-    #[arg(long, default_value_t = 0.4)]
+    /// Safety radius in parsecs used to model a planet's hyperspace no-fly zone.
+    ///
+    /// During hyperspace navigation, planets are treated as circular obstacles with this radius,
+    /// representing gravitational mass shadows, hyperspace shear, interdiction effects,
+    /// and standard navigational safety margins used by astrogators.
+    ///
+    /// This value does NOT represent the physical radius of the planet.
+    /// Larger values produce safer but longer routes with more detours,
+    /// while smaller values favor more direct (and riskier) trajectories.
+    ///
+    /// Default: 2.0 parsecs
+    #[arg(long, default_value_t = 2.0)]
     pub safety: f64,
 
     /// Extra clearance beyond obstacle radius when generating detours
@@ -275,10 +285,10 @@ pub struct RouteComputeArgs {
     pub proximity_margin: f64,
 
     /// Bounding box margin (parsec) around the segment A->B to fetch candidate obstacles
-    #[arg(long, default_value_t = 20.0)]
+    #[arg(long, default_value_t = 80.0)]
     pub bbox_margin: f64,
 
     /// Max obstacles to consider (debug safety cap)
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = 8000)]
     pub max_obstacles: usize,
 }

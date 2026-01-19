@@ -111,6 +111,8 @@ pub struct RouteRow {
     pub id: i64,
     pub from_planet_fid: i64,
     pub to_planet_fid: i64,
+    pub from_planet_name: String,
+    pub to_planet_name: String,
     pub algo_version: String,
     pub options_json: String,
     pub length: Option<f64>,
@@ -127,6 +129,9 @@ pub struct RouteWaypointRow {
     pub x: f64,
     pub y: f64,
     pub waypoint_id: Option<i64>,
+    // NEW (nullable because start/end may have no waypoint_id)
+    pub waypoint_name: Option<String>,
+    pub waypoint_kind: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -138,6 +143,7 @@ pub struct RouteDetourRow {
     pub segment_index: i64,
 
     pub obstacle_id: i64,
+    pub obstacle_name: String,
     pub obstacle_x: f64,
     pub obstacle_y: f64,
     pub obstacle_radius: f64,

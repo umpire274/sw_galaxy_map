@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
