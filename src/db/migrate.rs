@@ -2,7 +2,7 @@ use crate::ui;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 8;
 
 fn column_exists(tx: &Transaction<'_>, table: &str, col: &str) -> Result<bool> {
     let sql = format!("PRAGMA table_info({})", table);
@@ -156,6 +156,118 @@ fn m_to_v6(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn m_to_v7(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        -- =========================
+        -- ROUTES (computed runs)
+        -- =========================
+        CREATE TABLE IF NOT EXISTS routes (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_planet_fid INTEGER NOT NULL,
+          to_planet_fid   INTEGER NOT NULL,
+          algo_version    TEXT NOT NULL,
+          options_json    TEXT NOT NULL,
+          length          REAL,
+          iterations      INTEGER,
+          status          TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok','failed')),
+          error           TEXT,
+          created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          FOREIGN KEY(from_planet_fid) REFERENCES planets(FID),
+          FOREIGN KEY(to_planet_fid)   REFERENCES planets(FID)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_routes_from_to
+          ON routes(from_planet_fid, to_planet_fid, created_at);
+
+        -- =========================
+        -- ROUTE WAYPOINTS (polyline)
+        -- =========================
+        CREATE TABLE IF NOT EXISTS route_waypoints (
+          route_id     INTEGER NOT NULL,
+          seq          INTEGER NOT NULL,
+          x            REAL NOT NULL,
+          y            REAL NOT NULL,
+          waypoint_id  INTEGER,
+          PRIMARY KEY(route_id, seq),
+          FOREIGN KEY(route_id) REFERENCES routes(id) ON DELETE CASCADE,
+          FOREIGN KEY(waypoint_id) REFERENCES waypoints(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_route_waypoints_route
+          ON route_waypoints(route_id);
+
+        -- =========================
+        -- ROUTE DETOURS (decisions + score)
+        -- =========================
+        CREATE TABLE IF NOT EXISTS route_detours (
+          route_id        INTEGER NOT NULL,
+          idx             INTEGER NOT NULL,
+
+          iteration       INTEGER NOT NULL,
+          segment_index   INTEGER NOT NULL,
+
+          obstacle_id     INTEGER NOT NULL,
+          obstacle_x      REAL NOT NULL,
+          obstacle_y      REAL NOT NULL,
+          obstacle_radius REAL NOT NULL,
+
+          closest_t       REAL NOT NULL,
+          closest_qx      REAL NOT NULL,
+          closest_qy      REAL NOT NULL,
+          closest_dist    REAL NOT NULL,
+
+          offset_used     REAL NOT NULL,
+
+          wp_x            REAL NOT NULL,
+          wp_y            REAL NOT NULL,
+          waypoint_id     INTEGER,
+
+          score_base      REAL NOT NULL,
+          score_turn      REAL NOT NULL,
+          score_back      REAL NOT NULL,
+          score_proximity REAL NOT NULL,
+          score_total     REAL NOT NULL,
+
+          PRIMARY KEY(route_id, idx),
+          FOREIGN KEY(route_id) REFERENCES routes(id) ON DELETE CASCADE,
+          FOREIGN KEY(waypoint_id) REFERENCES waypoints(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_route_detours_route
+          ON route_detours(route_id);
+        "#,
+    )
+    .context("Failed to migrate schema to v7 (routes persistence tables)")?;
+
+    Ok(())
+}
+
+fn m_to_v8(tx: &Transaction<'_>) -> Result<()> {
+    // 1) Add routes.updated_at (idempotent)
+    if !column_exists(tx, "routes", "updated_at")? {
+        tx.execute_batch(
+            r#"
+            ALTER TABLE routes
+            ADD COLUMN updated_at TEXT;
+            "#,
+        )
+        .context("Failed to add routes.updated_at")?;
+    }
+
+    // 2) Ensure uniqueness for (from,to)
+    // If duplicates exist, this will fail: in that case we should deduplicate first.
+    tx.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_routes_from_to
+        ON routes(from_planet_fid, to_planet_fid);
+        "#,
+    )
+    .context("Failed to create unique index ux_routes_from_to on routes(from,to)")?;
+
+    Ok(())
+}
+
 /// Run schema migrations up to SCHEMA_VERSION.
 /// Idempotent and safe to call on every startup/open.
 pub fn run(con: &mut Connection) -> Result<()> {
@@ -205,6 +317,20 @@ pub fn run(con: &mut Connection) -> Result<()> {
         m_to_v6(&tx)?;
         meta_upsert(&tx, "schema_version", "6")?;
         ui::success("Migration v5 → v6 completed");
+    }
+
+    if current < 7 {
+        ui::info("Applying migration: v6 → v7 (routes persistence)");
+        m_to_v7(&tx)?;
+        meta_upsert(&tx, "schema_version", "7")?;
+        ui::success("Migration v6 → v7 completed");
+    }
+
+    if current < 8 {
+        ui::info("Applying migration: v7 → v8 (route upsert + updated_at)");
+        m_to_v8(&tx)?;
+        meta_upsert(&tx, "schema_version", "8")?;
+        ui::success("Migration v7 → v8 completed");
     }
 
     tx.commit().context("Failed to commit migration")?;

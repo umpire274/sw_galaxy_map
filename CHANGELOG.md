@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.2] – 2026-01-19
+
+### ✨ Routing & Persistence
+
+- Introduced full persistence for computed routes (schema v7–v8)
+- Routes are now **unique per (from, to)** pair and automatically **upserted**
+- Re-running a route with different parameters updates the existing record instead of creating duplicates
+- Added support for storing:
+    - route metadata (options, length, iterations, status)
+    - route polyline (ordered waypoints)
+    - detailed detour decisions with scoring breakdown
+- Computed detour waypoints are deduplicated via fingerprint and stored in the global waypoint catalog
+
+### 🧭 CLI Enhancements
+
+- Refactored `route` command into subcommands:
+    - `route compute <from> <to>`
+    - `route last <from> <to>`
+    - `route show <route_id>`
+- Added inspection commands for persisted routes
+- Improved routing debug output (detours, scoring, geometry)
+
+### 🧪 Tests
+
+- Added integration tests for routing:
+    - direct route without obstacles
+    - single obstacle detour
+    - multiple obstacles
+- Introduced shared collision-free assertion helper for routes
+
+### 🗄️ Database
+
+- Schema upgrades up to **v8**
+- Added `routes`, `route_waypoints`, `route_detours`
+- Enforced uniqueness on `(from_planet_fid, to_planet_fid)`
+- Added `updated_at` to routes for proper cache semantics
+
+### 🧹 Internal
+
+- Routing code refactored and modularized
+- Clippy clean (`-D warnings`)
+- Improved separation between routing logic, persistence, and CLI
+
+---
+
 ## [0.5.1] – 2026-01-19
 
 ### 🚀 Routing Engine (in-memory, v1)

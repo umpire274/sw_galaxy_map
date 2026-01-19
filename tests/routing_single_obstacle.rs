@@ -1,6 +1,8 @@
+mod common;
+
+use crate::common::assert_collision_free;
 use sw_galaxy_map::routing::collision::Obstacle;
 use sw_galaxy_map::routing::geometry::Point;
-use sw_galaxy_map::routing::route_debug::debug_print_route;
 use sw_galaxy_map::routing::router::{RouteOptions, compute_route};
 
 #[test]
@@ -20,10 +22,11 @@ fn route_with_single_obstacle_creates_detour() {
     };
 
     let route = compute_route(start, end, &obstacles, opts).expect("route computation failed");
-    debug_print_route(&route);
 
     // start -> W -> end
     assert!(route.waypoints.len() >= 3);
+
+    assert_collision_free(&route, &obstacles);
 
     // sanity: no waypoint equals the obstacle center
     for w in &route.waypoints {

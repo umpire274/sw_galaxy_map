@@ -1,8 +1,10 @@
 use crate::db::has_table;
 use crate::model::{AliasRow, NearHit, Planet, Waypoint, WaypointPlanetLink};
+use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
+use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
-// adatta: crate::models::Planet ecc.
+use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
   p.FID         AS fid,
@@ -589,4 +591,429 @@ pub fn list_planets_in_bbox(
         out.push(row?);
     }
     Ok(out)
+}
+
+fn round4(v: f64) -> f64 {
+    (v * 10_000.0).round() / 10_000.0
+}
+
+fn detour_fingerprint(from_fid: i64, to_fid: i64, d: &DetourDecision) -> String {
+    // fingerprint deterministico (con rounding), sufficiente per deduplica dei computed-waypoints
+    let s = format!(
+        "detour|from={}|to={}|ob={}|it={}|seg={}|x={:.4}|y={:.4}",
+        from_fid,
+        to_fid,
+        d.obstacle_id,
+        d.iteration,
+        d.segment_index,
+        round4(d.waypoint.x),
+        round4(d.waypoint.y)
+    );
+
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    hex::encode(h.finalize())
+}
+
+pub fn insert_route_waypoint(
+    con: &Connection,
+    route_id: i64,
+    seq: usize,
+    x: f64,
+    y: f64,
+    waypoint_id: Option<i64>,
+) -> Result<()> {
+    con.execute(
+        r#"
+        INSERT INTO route_waypoints(route_id, seq, x, y, waypoint_id)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+        params![route_id, seq as i64, x, y, waypoint_id],
+    )?;
+    Ok(())
+}
+
+pub fn insert_route_detour(
+    con: &Connection,
+    route_id: i64,
+    idx: usize,
+    d: &DetourDecision,
+    waypoint_id: Option<i64>,
+) -> Result<()> {
+    let total = d.score.total();
+
+    con.execute(
+        r#"
+        INSERT INTO route_detours(
+          route_id, idx,
+          iteration, segment_index,
+          obstacle_id, obstacle_x, obstacle_y, obstacle_radius,
+          closest_t, closest_qx, closest_qy, closest_dist,
+          offset_used,
+          wp_x, wp_y, waypoint_id,
+          score_base, score_turn, score_back, score_proximity, score_total
+        ) VALUES (
+          ?1, ?2,
+          ?3, ?4,
+          ?5, ?6, ?7, ?8,
+          ?9, ?10, ?11, ?12,
+          ?13,
+          ?14, ?15, ?16,
+          ?17, ?18, ?19, ?20, ?21
+        )
+        "#,
+        params![
+            route_id,
+            idx as i64,
+            d.iteration as i64,
+            d.segment_index as i64,
+            d.obstacle_id,
+            d.obstacle_center.x,
+            d.obstacle_center.y,
+            d.obstacle_radius,
+            d.closest_t,
+            d.closest_q.x,
+            d.closest_q.y,
+            d.closest_dist,
+            d.offset_used,
+            d.waypoint.x,
+            d.waypoint.y,
+            waypoint_id,
+            d.score.base,
+            d.score.turn,
+            d.score.back,
+            d.score.proximity,
+            total
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// Persist a computed route and its detours.
+/// - Creates a routes row
+/// - Upserts detour waypoints into catalog (waypoints) using fingerprint
+/// - Stores polyline (route_waypoints) and detour details (route_detours)
+pub fn persist_route(
+    con: &mut Connection,
+    from_planet_fid: i64,
+    to_planet_fid: i64,
+    opts: RouteOptions,
+    route: &ComputedRoute,
+) -> Result<i64> {
+    let tx = con
+        .transaction()
+        .context("Failed to start route persistence transaction")?;
+
+    let options_json = serde_json::to_string(&serde_json::json!({
+        "clearance": opts.clearance,
+        "max_iters": opts.max_iters,
+        "max_offset_tries": opts.max_offset_tries,
+        "offset_growth": opts.offset_growth,
+        "turn_weight": opts.turn_weight,
+        "back_weight": opts.back_weight,
+        "proximity_weight": opts.proximity_weight,
+        "proximity_margin": opts.proximity_margin,
+    }))?;
+
+    let route_id = upsert_route_id(
+        &tx,
+        from_planet_fid,
+        to_planet_fid,
+        "router_v1",
+        &options_json,
+        route.length,
+        route.iterations,
+    )?;
+
+    // IMPORTANT: replace existing polyline/detours for this from->to
+    delete_route_children(&tx, route_id)?;
+
+    // 1) Detours: upsert computed waypoint + store detour row.
+    // Build a small lookup (rounded) to attach waypoint_id to the polyline too.
+    use std::collections::HashMap;
+    let mut detour_wp_ids: HashMap<String, i64> = HashMap::new();
+
+    for (idx, d) in route.detours.iter().enumerate() {
+        let fp = detour_fingerprint(from_planet_fid, to_planet_fid, d);
+
+        let wp_name = format!("Detour {}", fp.get(0..8).unwrap_or("detour"));
+        let wp_norm = crate::normalize::normalize_text(&wp_name);
+
+        let (wp_id, _created) = upsert_computed_waypoint(
+            &tx,
+            &wp_name,
+            &wp_norm,
+            d.waypoint.x,
+            d.waypoint.y,
+            "computed",
+            Some("Computed detour waypoint"),
+            &fp,
+        )?;
+
+        // Optional but useful: link computed waypoint to the obstacle planet as "avoid"
+        // (obstacle_id is a planet fid in your current model)
+        // distance = dist between waypoint and obstacle center
+        let dist_to_ob = crate::routing::geometry::dist(d.waypoint, d.obstacle_center);
+        // Ignore errors if already linked (depending on your UNIQUE/PK constraints you may want INSERT OR REPLACE)
+        let _ = link_waypoint_to_planet(&tx, wp_id, d.obstacle_id, "avoid", Some(dist_to_ob));
+
+        insert_route_detour(&tx, route_id, idx, d, Some(wp_id))?;
+
+        let key = format!("{:.4},{:.4}", round4(d.waypoint.x), round4(d.waypoint.y));
+        detour_wp_ids.insert(key, wp_id);
+    }
+
+    // 2) Route polyline
+    for (seq, p) in route.waypoints.iter().enumerate() {
+        let key = format!("{:.4},{:.4}", round4(p.x), round4(p.y));
+        let waypoint_id = detour_wp_ids.get(&key).copied();
+        insert_route_waypoint(&tx, route_id, seq, p.x, p.y, waypoint_id)?;
+    }
+
+    tx.commit()
+        .context("Failed to commit route persistence transaction")?;
+    Ok(route_id)
+}
+
+pub fn upsert_route_id(
+    con: &Connection,
+    from_planet_fid: i64,
+    to_planet_fid: i64,
+    algo_version: &str,
+    options_json: &str,
+    length: f64,
+    iterations: usize,
+) -> Result<i64> {
+    con.execute(
+        r#"
+        INSERT INTO routes(
+          from_planet_fid, to_planet_fid, algo_version, options_json,
+          length, iterations, status, error, created_at, updated_at
+        )
+        VALUES (
+          ?1, ?2, ?3, ?4,
+          ?5, ?6, 'ok', NULL,
+          strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+          strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        )
+        ON CONFLICT(from_planet_fid, to_planet_fid) DO UPDATE SET
+          algo_version = excluded.algo_version,
+          options_json = excluded.options_json,
+          length       = excluded.length,
+          iterations   = excluded.iterations,
+          status       = 'ok',
+          error        = NULL,
+          updated_at   = excluded.updated_at
+        "#,
+        params![
+            from_planet_fid,
+            to_planet_fid,
+            algo_version,
+            options_json,
+            length,
+            iterations as i64
+        ],
+    )?;
+
+    let id: i64 = con.query_row(
+        r#"
+        SELECT id
+        FROM routes
+        WHERE from_planet_fid = ?1 AND to_planet_fid = ?2
+        "#,
+        params![from_planet_fid, to_planet_fid],
+        |r| r.get(0),
+    )?;
+
+    Ok(id)
+}
+
+fn delete_route_children(con: &Connection, route_id: i64) -> Result<()> {
+    con.execute(
+        "DELETE FROM route_waypoints WHERE route_id = ?1",
+        [route_id],
+    )?;
+    con.execute("DELETE FROM route_detours WHERE route_id = ?1", [route_id])?;
+    Ok(())
+}
+
+fn route_from_row(r: &Row<'_>) -> rusqlite::Result<RouteRow> {
+    Ok(RouteRow {
+        id: r.get("id")?,
+        from_planet_fid: r.get("from_planet_fid")?,
+        to_planet_fid: r.get("to_planet_fid")?,
+        algo_version: r.get("algo_version")?,
+        options_json: r.get("options_json")?,
+        length: r.get("length")?,
+        iterations: r.get("iterations")?,
+        status: r.get("status")?,
+        error: r.get("error")?,
+        created_at: r.get("created_at")?,
+        updated_at: r.get("updated_at")?,
+    })
+}
+
+fn route_waypoint_from_row(r: &Row<'_>) -> rusqlite::Result<RouteWaypointRow> {
+    Ok(RouteWaypointRow {
+        seq: r.get("seq")?,
+        x: r.get("x")?,
+        y: r.get("y")?,
+        waypoint_id: r.get("waypoint_id")?,
+    })
+}
+
+fn route_detour_from_row(r: &Row<'_>) -> rusqlite::Result<RouteDetourRow> {
+    Ok(RouteDetourRow {
+        idx: r.get("idx")?,
+        iteration: r.get("iteration")?,
+        segment_index: r.get("segment_index")?,
+
+        obstacle_id: r.get("obstacle_id")?,
+        obstacle_x: r.get("obstacle_x")?,
+        obstacle_y: r.get("obstacle_y")?,
+        obstacle_radius: r.get("obstacle_radius")?,
+
+        closest_t: r.get("closest_t")?,
+        closest_qx: r.get("closest_qx")?,
+        closest_qy: r.get("closest_qy")?,
+        closest_dist: r.get("closest_dist")?,
+
+        offset_used: r.get("offset_used")?,
+
+        wp_x: r.get("wp_x")?,
+        wp_y: r.get("wp_y")?,
+        waypoint_id: r.get("waypoint_id")?,
+
+        score_base: r.get("score_base")?,
+        score_turn: r.get("score_turn")?,
+        score_back: r.get("score_back")?,
+        score_proximity: r.get("score_proximity")?,
+        score_total: r.get("score_total")?,
+    })
+}
+
+pub fn get_route_by_from_to(
+    con: &Connection,
+    from_planet_fid: i64,
+    to_planet_fid: i64,
+) -> Result<Option<RouteRow>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT
+          id,
+          from_planet_fid,
+          to_planet_fid,
+          algo_version,
+          options_json,
+          length,
+          iterations,
+          status,
+          error,
+          created_at,
+          updated_at
+        FROM routes
+        WHERE from_planet_fid = ?1 AND to_planet_fid = ?2
+        LIMIT 1
+        "#,
+    )?;
+
+    let row = stmt
+        .query_row(params![from_planet_fid, to_planet_fid], route_from_row)
+        .optional()?;
+
+    Ok(row)
+}
+
+pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>> {
+    // 1) Route header
+    let mut stmt_route = con.prepare(
+        r#"
+        SELECT
+          id,
+          from_planet_fid,
+          to_planet_fid,
+          algo_version,
+          options_json,
+          length,
+          iterations,
+          status,
+          error,
+          created_at,
+          updated_at
+        FROM routes
+        WHERE id = ?1
+        LIMIT 1
+        "#,
+    )?;
+
+    let route = stmt_route
+        .query_row([route_id], route_from_row)
+        .optional()?;
+
+    let Some(route) = route else {
+        return Ok(None);
+    };
+
+    // 2) Polyline
+    let mut stmt_wp = con.prepare(
+        r#"
+        SELECT
+          seq,
+          x,
+          y,
+          waypoint_id
+        FROM route_waypoints
+        WHERE route_id = ?1
+        ORDER BY seq ASC
+        "#,
+    )?;
+
+    let mut waypoints: Vec<RouteWaypointRow> = Vec::new();
+    let rows = stmt_wp.query_map([route_id], route_waypoint_from_row)?;
+    for r in rows {
+        waypoints.push(r?);
+    }
+
+    // 3) Detours
+    let mut stmt_det = con.prepare(
+        r#"
+        SELECT
+          idx,
+          iteration,
+          segment_index,
+          obstacle_id,
+          obstacle_x,
+          obstacle_y,
+          obstacle_radius,
+          closest_t,
+          closest_qx,
+          closest_qy,
+          closest_dist,
+          offset_used,
+          wp_x,
+          wp_y,
+          waypoint_id,
+          score_base,
+          score_turn,
+          score_back,
+          score_proximity,
+          score_total
+        FROM route_detours
+        WHERE route_id = ?1
+        ORDER BY idx ASC
+        "#,
+    )?;
+
+    let mut detours: Vec<RouteDetourRow> = Vec::new();
+    let rows = stmt_det.query_map([route_id], route_detour_from_row)?;
+    for r in rows {
+        detours.push(r?);
+    }
+
+    Ok(Some(RouteLoaded {
+        route,
+        waypoints,
+        detours,
+    }))
 }
