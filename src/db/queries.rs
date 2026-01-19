@@ -30,6 +30,22 @@ const PLANET_SELECT_CANON: &str = r#"
   p.CRegion_li  AS c_region_li
 "#;
 
+const ROUTE_SELECT: &str = r#"
+  r.id             AS id,
+  r.from_planet_fid AS from_planet_fid,
+  r.to_planet_fid   AS to_planet_fid,
+  pf.Planet         AS from_planet_name,
+  pt.Planet         AS to_planet_name,
+  r.algo_version    AS algo_version,
+  r.options_json    AS options_json,
+  r.length          AS length,
+  r.iterations      AS iterations,
+  r.status          AS status,
+  r.error           AS error,
+  r.created_at      AS created_at,
+  r.updated_at      AS updated_at
+"#;
+
 pub fn find_planet_by_norm(con: &Connection, planet_norm: &str) -> Result<Option<Planet>> {
     let sql = format!(
         r#"
@@ -843,6 +859,8 @@ fn route_from_row(r: &Row<'_>) -> rusqlite::Result<RouteRow> {
         id: r.get("id")?,
         from_planet_fid: r.get("from_planet_fid")?,
         to_planet_fid: r.get("to_planet_fid")?,
+        from_planet_name: r.get("from_planet_name")?,
+        to_planet_name: r.get("to_planet_name")?,
         algo_version: r.get("algo_version")?,
         options_json: r.get("options_json")?,
         length: r.get("length")?,
@@ -860,6 +878,8 @@ fn route_waypoint_from_row(r: &Row<'_>) -> rusqlite::Result<RouteWaypointRow> {
         x: r.get("x")?,
         y: r.get("y")?,
         waypoint_id: r.get("waypoint_id")?,
+        waypoint_name: r.get("waypoint_name")?,
+        waypoint_kind: r.get("waypoint_kind")?,
     })
 }
 
@@ -870,6 +890,7 @@ fn route_detour_from_row(r: &Row<'_>) -> rusqlite::Result<RouteDetourRow> {
         segment_index: r.get("segment_index")?,
 
         obstacle_id: r.get("obstacle_id")?,
+        obstacle_name: r.get("obstacle_name")?,
         obstacle_x: r.get("obstacle_x")?,
         obstacle_y: r.get("obstacle_y")?,
         obstacle_radius: r.get("obstacle_radius")?,
@@ -898,26 +919,20 @@ pub fn get_route_by_from_to(
     from_planet_fid: i64,
     to_planet_fid: i64,
 ) -> Result<Option<RouteRow>> {
-    let mut stmt = con.prepare(
+    let sql = format!(
         r#"
         SELECT
-          id,
-          from_planet_fid,
-          to_planet_fid,
-          algo_version,
-          options_json,
-          length,
-          iterations,
-          status,
-          error,
-          created_at,
-          updated_at
-        FROM routes
-        WHERE from_planet_fid = ?1 AND to_planet_fid = ?2
+          {select}
+        FROM routes r
+        JOIN planets pf ON pf.FID = r.from_planet_fid
+        JOIN planets pt ON pt.FID = r.to_planet_fid
+        WHERE r.from_planet_fid = ?1 AND r.to_planet_fid = ?2
         LIMIT 1
         "#,
-    )?;
+        select = ROUTE_SELECT
+    );
 
+    let mut stmt = con.prepare(&sql)?;
     let row = stmt
         .query_row(params![from_planet_fid, to_planet_fid], route_from_row)
         .optional()?;
@@ -927,26 +942,20 @@ pub fn get_route_by_from_to(
 
 pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>> {
     // 1) Route header
-    let mut stmt_route = con.prepare(
+    let sql = format!(
         r#"
         SELECT
-          id,
-          from_planet_fid,
-          to_planet_fid,
-          algo_version,
-          options_json,
-          length,
-          iterations,
-          status,
-          error,
-          created_at,
-          updated_at
-        FROM routes
-        WHERE id = ?1
+          {select}
+        FROM routes r
+        JOIN planets pf ON pf.FID = r.from_planet_fid
+        JOIN planets pt ON pt.FID = r.to_planet_fid
+        WHERE r.id = ?1
         LIMIT 1
         "#,
-    )?;
+        select = ROUTE_SELECT
+    );
 
+    let mut stmt_route = con.prepare(&sql)?;
     let route = stmt_route
         .query_row([route_id], route_from_row)
         .optional()?;
@@ -959,13 +968,17 @@ pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>
     let mut stmt_wp = con.prepare(
         r#"
         SELECT
-          seq,
-          x,
-          y,
-          waypoint_id
-        FROM route_waypoints
-        WHERE route_id = ?1
-        ORDER BY seq ASC
+          rw.seq         AS seq,
+          rw.x           AS x,
+          rw.y           AS y,
+          rw.waypoint_id AS waypoint_id,
+
+          w.name         AS waypoint_name,
+          w.kind         AS waypoint_kind
+        FROM route_waypoints rw
+        LEFT JOIN waypoints w ON w.id = rw.waypoint_id
+        WHERE rw.route_id = ?1
+        ORDER BY rw.seq ASC
         "#,
     )?;
 
@@ -979,29 +992,37 @@ pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>
     let mut stmt_det = con.prepare(
         r#"
         SELECT
-          idx,
-          iteration,
-          segment_index,
-          obstacle_id,
-          obstacle_x,
-          obstacle_y,
-          obstacle_radius,
-          closest_t,
-          closest_qx,
-          closest_qy,
-          closest_dist,
-          offset_used,
-          wp_x,
-          wp_y,
-          waypoint_id,
-          score_base,
-          score_turn,
-          score_back,
-          score_proximity,
-          score_total
-        FROM route_detours
-        WHERE route_id = ?1
-        ORDER BY idx ASC
+          d.idx              AS idx,
+          d.iteration        AS iteration,
+          d.segment_index    AS segment_index,
+    
+          d.obstacle_id      AS obstacle_id,
+          COALESCE(p.Planet, '') AS obstacle_name,
+    
+          d.obstacle_x       AS obstacle_x,
+          d.obstacle_y       AS obstacle_y,
+          d.obstacle_radius  AS obstacle_radius,
+    
+          d.closest_t        AS closest_t,
+          d.closest_qx       AS closest_qx,
+          d.closest_qy       AS closest_qy,
+          d.closest_dist     AS closest_dist,
+    
+          d.offset_used      AS offset_used,
+    
+          d.wp_x             AS wp_x,
+          d.wp_y             AS wp_y,
+          d.waypoint_id      AS waypoint_id,
+    
+          d.score_base       AS score_base,
+          d.score_turn       AS score_turn,
+          d.score_back       AS score_back,
+          d.score_proximity  AS score_proximity,
+          d.score_total      AS score_total
+        FROM route_detours d
+        LEFT JOIN planets p ON p.FID = d.obstacle_id
+        WHERE d.route_id = ?1
+        ORDER BY d.idx ASC
         "#,
     )?;
 

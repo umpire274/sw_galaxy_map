@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.3] – 2026-01-19
+
+### ✨ Routing & Persistence
+
+- Stabilized routing engine (router_v1) with robust detour handling
+- Full support for:
+    - angular penalty (turn_weight)
+    - backtracking penalty
+    - proximity penalty to other planets
+- Default `safety = 2.0 parsecs` validated on real routes
+
+### 🧭 Computed Waypoints
+
+- Persistence of detour waypoints as `computed`
+- Deterministic fingerprint-based deduplication
+- Automatic waypoint → obstacle planet linking with role `avoid`
+
+### 🗺️ Persisted Routes
+
+- Route upsert per (from → to) planet pair
+- Existing routes are updated when routing parameters change
+- Full persistence of:
+    - route polyline (`route_waypoints`)
+    - detailed detour data (`route_detours`)
+    - score breakdown for each detour decision
+
+### 🔍 Improved `route show`
+
+- Display planet names (start / end) instead of raw FIDs
+- Direct JOINs to retrieve:
+    - obstacle planet names in detours
+    - associated waypoint names
+- Semantic labels:
+    - `Start` / `End` instead of `wp_id=-`
+- Cleaner output, ready for future visualizations
+
+### 🧪 Tests
+
+- Routing integration tests:
+    - direct route
+    - single obstacle
+    - multiple obstacles
+- Shared helper `assert_collision_free`
+
+### 📚 Documentation
+
+- Documented:
+    - meaning and usage of the `--safety` parameter
+    - detour waypoint selection algorithm
+    - database design for routes and computed waypoints
+
+### 🧹 Misc
+
+- Clippy clean (warning-free)
+- Cleanup of legacy and unused APIs
+
+---
+
 ## [0.5.2] – 2026-01-19
 
 ### ✨ Routing & Persistence

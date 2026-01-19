@@ -95,9 +95,11 @@ fn run_show(con: &Connection, route_id: i64) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
 
     println!(
-        "Route #{} (from_fid={} to_fid={}) status={}",
+        "Route #{} (FROM {} [{}] TO {} [{}]) status={}",
         loaded.route.id,
+        loaded.route.from_planet_name,
         loaded.route.from_planet_fid,
+        loaded.route.to_planet_name,
         loaded.route.to_planet_fid,
         loaded.route.status
     );
@@ -113,24 +115,47 @@ fn run_show(con: &Connection, route_id: i64) -> Result<()> {
         println!("Created: {}", loaded.route.created_at);
     }
 
+    let last_seq = loaded.waypoints.len().saturating_sub(1);
     println!("Waypoints: {}", loaded.waypoints.len());
     for w in &loaded.waypoints {
-        println!(
-            "  {:>3}: ({:>10.3}, {:>10.3}) wp_id={}",
-            w.seq,
-            w.x,
-            w.y,
-            w.waypoint_id
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "-".into())
-        );
+        let label = if w.seq as usize == 0 {
+            "Start".to_string()
+        } else if w.seq as usize == last_seq {
+            "End".to_string()
+        } else {
+            match (
+                w.waypoint_id,
+                w.waypoint_name.as_deref(),
+                w.waypoint_kind.as_deref(),
+            ) {
+                (Some(_id), Some(name), Some(kind)) => {
+                    format!("{} (kind={})", name, kind)
+                }
+                (Some(id), Some(name), None) => {
+                    format!("{} (id={})", name, id)
+                }
+                (Some(id), None, _) => {
+                    format!("wp_id={}", id)
+                }
+                (None, _, _) => "intermediate".to_string(),
+            }
+        };
+
+        println!("  {:>3}: ({:>10.3}, {:>10.3}) {}", w.seq, w.x, w.y, label);
     }
 
     println!("Detours: {}", loaded.detours.len());
     for d in &loaded.detours {
         println!(
-            "  det#{:<3} it={} seg={} obstacle={} wp=({:.3},{:.3}) score={:.3}",
-            d.idx, d.iteration, d.segment_index, d.obstacle_id, d.wp_x, d.wp_y, d.score_total
+            "  det#{:<3} it={} seg={} obstacle={} [{}] wp=({:.3},{:.3}) score={:.3}",
+            d.idx,
+            d.iteration,
+            d.segment_index,
+            d.obstacle_name,
+            d.obstacle_id,
+            d.wp_x,
+            d.wp_y,
+            d.score_total
         );
     }
 
