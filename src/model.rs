@@ -104,3 +104,63 @@ impl Planet {
         fandom_planet_url(&self.planet)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct RouteRow {
+    pub id: i64,
+    pub from_planet_fid: i64,
+    pub to_planet_fid: i64,
+    pub algo_version: String,
+    pub options_json: String,
+    pub length: Option<f64>,
+    pub iterations: Option<i64>,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteWaypointRow {
+    pub seq: i64,
+    pub x: f64,
+    pub y: f64,
+    pub waypoint_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteDetourRow {
+    pub idx: i64,
+
+    pub iteration: i64,
+    pub segment_index: i64,
+
+    pub obstacle_id: i64,
+    pub obstacle_x: f64,
+    pub obstacle_y: f64,
+    pub obstacle_radius: f64,
+
+    pub closest_t: f64,
+    pub closest_qx: f64,
+    pub closest_qy: f64,
+    pub closest_dist: f64,
+
+    pub offset_used: f64,
+
+    pub wp_x: f64,
+    pub wp_y: f64,
+    pub waypoint_id: Option<i64>,
+
+    pub score_base: f64,
+    pub score_turn: f64,
+    pub score_back: f64,
+    pub score_proximity: f64,
+    pub score_total: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteLoaded {
+    pub route: RouteRow,
+    pub waypoints: Vec<RouteWaypointRow>,
+    pub detours: Vec<RouteDetourRow>,
+}

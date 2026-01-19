@@ -68,8 +68,11 @@ pub enum Commands {
         cmd: WaypointCmd,
     },
 
-    /// Compute a route (in-memory router v1)
-    Route(RouteArgs),
+    /// Routing commands (router v1)
+    Route {
+        #[command(subcommand)]
+        cmd: RouteCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -209,8 +212,29 @@ pub enum WaypointCmd {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum RouteCmd {
+    /// Compute and persist a route between two planets (name or alias)
+    Compute(RouteComputeArgs),
+
+    /// Show a persisted route by id
+    Show {
+        /// Route id
+        route_id: i64,
+    },
+
+    /// Show the current persisted route for a FROM→TO pair (unique in schema v8)
+    Last {
+        /// Start planet name (or alias)
+        from: String,
+
+        /// Destination planet name (or alias)
+        to: String,
+    },
+}
+
 #[derive(Args, Debug)]
-pub struct RouteArgs {
+pub struct RouteComputeArgs {
     /// Start planet name (or alias)
     pub from: String,
 

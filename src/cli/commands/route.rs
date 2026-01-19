@@ -1,15 +1,23 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use rusqlite::Connection;
 
-use crate::cli::args::RouteArgs;
+use crate::cli::args::{RouteCmd, RouteComputeArgs};
 use crate::db::queries;
 use crate::normalize::normalize_text;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
 use crate::routing::route_debug::debug_print_route;
-use crate::routing::router::{RouteOptions, compute_route};
+use crate::routing::router::{compute_route, RouteOptions};
 
-pub fn run(con: &Connection, args: &RouteArgs) -> Result<()> {
+pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
+    match cmd {
+        RouteCmd::Compute(args) => run_compute(con, args),
+        RouteCmd::Show { route_id } => run_show(con, *route_id),
+        RouteCmd::Last { from, to } => run_last(con, from, to),
+    }
+}
+
+fn run_compute(con: &mut Connection, args: &RouteComputeArgs) -> Result<()> {
     // 1) Resolve FROM/TO planets (name or alias)
     let from_norm = normalize_text(&args.from);
     let to_norm = normalize_text(&args.to);
@@ -67,7 +75,11 @@ pub fn run(con: &Connection, args: &RouteArgs) -> Result<()> {
     // 5) Compute route
     let route = compute_route(start, end, &obstacles, opts)?;
 
+    // 6) Persist route (v7)
+    let route_id = queries::persist_route(con, from_p.fid, to_p.fid, opts, &route)?;
+
     println!("Route: {} → {}", from_p.planet, to_p.planet);
+    println!("Route ID: {}", route_id);
     println!("Waypoints: {}", route.waypoints.len());
     println!("Detours: {}", route.detours.len());
     println!("Length: {:.3} parsec", route.length);
@@ -76,4 +88,73 @@ pub fn run(con: &Connection, args: &RouteArgs) -> Result<()> {
     debug_print_route(&route);
 
     Ok(())
+}
+
+fn run_show(con: &Connection, route_id: i64) -> Result<()> {
+    let loaded = queries::load_route(con, route_id)?
+        .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
+
+    println!(
+        "Route #{} (from_fid={} to_fid={}) status={}",
+        loaded.route.id,
+        loaded.route.from_planet_fid,
+        loaded.route.to_planet_fid,
+        loaded.route.status
+    );
+    if let Some(len) = loaded.route.length {
+        println!("Length: {:.3} parsec", len);
+    }
+    if let Some(it) = loaded.route.iterations {
+        println!("Iterations: {}", it);
+    }
+    if let Some(upd) = loaded.route.updated_at.as_deref() {
+        println!("Updated: {}", upd);
+    } else {
+        println!("Created: {}", loaded.route.created_at);
+    }
+
+    println!("Waypoints: {}", loaded.waypoints.len());
+    for w in &loaded.waypoints {
+        println!(
+            "  {:>3}: ({:>10.3}, {:>10.3}) wp_id={}",
+            w.seq,
+            w.x,
+            w.y,
+            w.waypoint_id
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".into())
+        );
+    }
+
+    println!("Detours: {}", loaded.detours.len());
+    for d in &loaded.detours {
+        println!(
+            "  det#{:<3} it={} seg={} obstacle={} wp=({:.3},{:.3}) score={:.3}",
+            d.idx, d.iteration, d.segment_index, d.obstacle_id, d.wp_x, d.wp_y, d.score_total
+        );
+    }
+
+    Ok(())
+}
+
+fn run_last(con: &Connection, from: &str, to: &str) -> Result<()> {
+    use crate::normalize::normalize_text;
+
+    let from_norm = normalize_text(from);
+    let to_norm = normalize_text(to);
+
+    let from_p = queries::find_planet_for_info(con, &from_norm)?
+        .ok_or_else(|| anyhow::anyhow!("Planet not found: {}", from))?;
+    let to_p = queries::find_planet_for_info(con, &to_norm)?
+        .ok_or_else(|| anyhow::anyhow!("Planet not found: {}", to))?;
+
+    let r = queries::get_route_by_from_to(con, from_p.fid, to_p.fid)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "No persisted route found for {} → {}",
+            from_p.planet,
+            to_p.planet
+        )
+    })?;
+
+    run_show(con, r.id)
 }

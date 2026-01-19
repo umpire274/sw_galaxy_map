@@ -1,6 +1,8 @@
+mod common;
+
+use crate::common::assert_collision_free;
 use sw_galaxy_map::routing::collision::Obstacle;
 use sw_galaxy_map::routing::geometry::Point;
-use sw_galaxy_map::routing::route_debug::debug_print_route;
 use sw_galaxy_map::routing::router::{RouteOptions, compute_route};
 
 #[test]
@@ -28,10 +30,11 @@ fn route_with_multiple_obstacles_is_safe() {
     };
 
     let route = compute_route(start, end, &obstacles, opts).expect("route computation failed");
-    debug_print_route(&route);
 
     assert!(route.waypoints.len() >= 3);
     assert!(route.iterations > 0);
+
+    assert_collision_free(&route, &obstacles);
 
     // Basic monotonicity: start and end preserved
     assert_eq!(route.waypoints.first().copied(), Some(start));
