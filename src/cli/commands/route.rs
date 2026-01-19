@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use rusqlite::Connection;
 
 use crate::cli::args::{RouteCmd, RouteComputeArgs};
@@ -7,7 +7,7 @@ use crate::normalize::normalize_text;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
 use crate::routing::route_debug::debug_print_route;
-use crate::routing::router::{compute_route, RouteOptions};
+use crate::routing::router::{RouteOptions, compute_route};
 
 pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
     match cmd {

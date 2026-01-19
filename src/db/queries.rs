@@ -3,7 +3,7 @@ use crate::model::{AliasRow, NearHit, Planet, Waypoint, WaypointPlanetLink};
 use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
