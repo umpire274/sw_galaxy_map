@@ -1,6 +1,6 @@
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(
     name = "sw_galaxy_map",
     version,
@@ -15,17 +15,23 @@ pub struct Cli {
     pub cmd: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Search planets by text (uses FTS if available, otherwise LIKE)
     Search {
+        /// Search query (name, description, features, ...)
         query: String,
+
+        /// Max rows (default: 20)
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
 
     /// Print all available information about a planet
-    Info { planet: String },
+    Info {
+        /// Planet name (or alias)
+        planet: String,
+    },
 
     /// Find nearby planets within a radius (parsecs) using Euclidean distance on X/Y
     Near {
@@ -45,6 +51,7 @@ pub enum Commands {
         #[arg(long)]
         y: Option<f64>,
 
+        /// Max rows (default: 20)
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
@@ -60,9 +67,12 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaypointCmd,
     },
+
+    /// Compute a route (in-memory router v1)
+    Route(RouteArgs),
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum DbCommands {
     /// Initialize the local SQLite database by downloading data from the remote service
     Init {
@@ -71,31 +81,37 @@ pub enum DbCommands {
         out: Option<String>,
 
         /// Overwrite existing database if present
-        #[arg(long, default_value_t = false)]
+        #[arg(long, action = ArgAction::SetTrue)]
         force: bool,
     },
 
     /// Show local database status (path, meta, counts)
     Status,
+
+    /// Update the local database with new data from the remote service
     Update {
         /// Permanently remove planets marked as deleted
-        #[arg(long)]
+        #[arg(long, action = ArgAction::SetTrue)]
         prune: bool,
 
         /// Perform a dry run without modifying the database
-        #[arg(long)]
+        #[arg(long, action = ArgAction::SetTrue)]
         dry_run: bool,
 
-        #[arg(long)]
+        /// Show update statistics
+        #[arg(long, action = ArgAction::SetTrue)]
         stats: bool,
 
+        /// Limit for statistics output (default: 10)
         #[arg(long, default_value_t = 10)]
         stats_limit: usize,
     },
+
+    /// Migrate the local database to the latest schema version
     Migrate,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum WaypointCmd {
     /// Add a new waypoint
     Add {
@@ -137,5 +153,108 @@ pub enum WaypointCmd {
     },
 
     /// Delete waypoint by id
-    Delete { id: i64 },
+    Delete {
+        /// Waypoint id
+        id: i64,
+    },
+
+    /// Link a waypoint to a planet (planet name or alias)
+    Link {
+        /// Waypoint ID
+        waypoint_id: i64,
+
+        /// Planet name or alias
+        planet: String,
+
+        /// Role of the planet for this waypoint (default: "anchor")
+        #[arg(long, default_value = "anchor")]
+        role: String,
+
+        /// Optional distance (parsec). If omitted, it can be computed later.
+        #[arg(long)]
+        distance: Option<f64>,
+    },
+
+    /// List planet links for a waypoint
+    Links {
+        /// Waypoint ID
+        waypoint_id: i64,
+    },
+
+    /// List waypoints linked to a planet (planet name or alias)
+    ForPlanet {
+        /// Planet name or alias
+        planet: String,
+
+        /// Optional role filter
+        #[arg(long)]
+        role: Option<String>,
+
+        /// Max rows (default: 50)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+
+        /// Offset (default: 0)
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
+
+    /// Unlink a waypoint from a planet
+    Unlink {
+        /// Waypoint ID
+        waypoint_id: i64,
+
+        /// Planet name or alias
+        planet: String,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct RouteArgs {
+    /// Start planet name (or alias)
+    pub from: String,
+
+    /// Destination planet name (or alias)
+    pub to: String,
+
+    /// Safety radius (parsec) used as obstacle radius (planets are treated as circles)
+    #[arg(long, default_value_t = 0.4)]
+    pub safety: f64,
+
+    /// Extra clearance beyond obstacle radius when generating detours
+    #[arg(long, default_value_t = 0.2)]
+    pub clearance: f64,
+
+    #[arg(long, default_value_t = 32)]
+    pub max_iters: usize,
+
+    #[arg(long, default_value_t = 6)]
+    pub max_offset_tries: usize,
+
+    #[arg(long, default_value_t = 1.4)]
+    pub offset_growth: f64,
+
+    /// Penalize sharp turns
+    #[arg(long, default_value_t = 0.8)]
+    pub turn_weight: f64,
+
+    /// Penalize moving backward relative to A->B direction
+    #[arg(long, default_value_t = 3.0)]
+    pub back_weight: f64,
+
+    /// Penalize getting close to other obstacles (soft constraint)
+    #[arg(long, default_value_t = 1.5)]
+    pub proximity_weight: f64,
+
+    /// Extra band beyond obstacle radius for proximity penalty
+    #[arg(long, default_value_t = 0.5)]
+    pub proximity_margin: f64,
+
+    /// Bounding box margin (parsec) around the segment A->B to fetch candidate obstacles
+    #[arg(long, default_value_t = 20.0)]
+    pub bbox_margin: f64,
+
+    /// Max obstacles to consider (debug safety cap)
+    #[arg(long, default_value_t = 5000)]
+    pub max_obstacles: usize,
 }
