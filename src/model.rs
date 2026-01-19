@@ -105,6 +105,7 @@ impl Planet {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RouteRow {
     pub id: i64,
@@ -128,6 +129,7 @@ pub struct RouteWaypointRow {
     pub waypoint_id: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RouteDetourRow {
     pub idx: i64,

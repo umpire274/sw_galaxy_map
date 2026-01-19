@@ -615,33 +615,6 @@ fn detour_fingerprint(from_fid: i64, to_fid: i64, d: &DetourDecision) -> String 
     hex::encode(h.finalize())
 }
 
-pub fn insert_route(
-    con: &Connection,
-    from_planet_fid: i64,
-    to_planet_fid: i64,
-    algo_version: &str,
-    options_json: &str,
-    length: f64,
-    iterations: usize,
-) -> Result<i64> {
-    con.execute(
-        r#"
-        INSERT INTO routes(from_planet_fid, to_planet_fid, algo_version, options_json, length, iterations, status)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ok')
-        "#,
-        params![
-            from_planet_fid,
-            to_planet_fid,
-            algo_version,
-            options_json,
-            length,
-            iterations as i64
-        ],
-    )?;
-
-    Ok(con.last_insert_rowid())
-}
-
 pub fn insert_route_waypoint(
     con: &Connection,
     route_id: i64,
