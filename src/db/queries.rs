@@ -1,9 +1,11 @@
 use crate::db::has_table;
-use crate::model::{AliasRow, NearHit, Planet, RoutingObstacleRow, Waypoint, WaypointPlanetLink};
+use crate::model::{
+    AliasRow, NearHit, Planet, RouteListRow, RoutingObstacleRow, Waypoint, WaypointPlanetLink,
+};
 use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, ToSql, params};
 use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
@@ -1103,4 +1105,104 @@ pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>
         waypoints,
         detours,
     }))
+}
+
+pub fn list_routes(
+    con: &Connection,
+    limit: usize,
+    status: Option<&str>,
+    from: Option<i64>,
+    to: Option<i64>,
+    sort: crate::cli::args::RouteListSort,
+) -> Result<Vec<RouteListRow>> {
+    let mut where_parts: Vec<&'static str> = Vec::new();
+    let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+
+    if let Some(s) = status {
+        where_parts.push("lower(r.status) = lower(?)"); // exact match
+        params.push(Box::new(s.to_string()));
+    }
+    if let Some(fid) = from {
+        where_parts.push("r.from_planet_fid = ?");
+        params.push(Box::new(fid));
+    }
+    if let Some(fid) = to {
+        where_parts.push("r.to_planet_fid = ?");
+        params.push(Box::new(fid));
+    }
+
+    let where_sql = if where_parts.is_empty() {
+        "".to_string()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
+
+    // ORDER BY MUST be whitelisted (never bound as a parameter)
+    let order_sql = match sort {
+        crate::cli::args::RouteListSort::Updated => {
+            "ORDER BY COALESCE(r.updated_at, r.created_at) DESC, r.id DESC"
+        }
+        crate::cli::args::RouteListSort::Id => "ORDER BY r.id DESC",
+        crate::cli::args::RouteListSort::Length => {
+            // Put NULL lengths last
+            "ORDER BY (r.length IS NULL) ASC, r.length ASC, r.id DESC"
+        }
+    };
+
+    let sql = format!(
+        r#"
+        SELECT
+          r.id AS id,
+          r.from_planet_fid AS from_planet_fid,
+          fp.planet_norm AS from_planet_name,
+          r.to_planet_fid AS to_planet_fid,
+          tp.planet_norm AS to_planet_name,
+
+          r.status AS status,
+          r.length AS length,
+          r.iterations AS iterations,
+
+          r.created_at AS created_at,
+          r.updated_at AS updated_at,
+
+          (SELECT COUNT(*) FROM route_waypoints w WHERE w.route_id = r.id) AS waypoints_count,
+          (SELECT COUNT(*) FROM route_detours d WHERE d.route_id = r.id) AS detours_count
+
+        FROM routes r
+        JOIN planets fp ON fp.FID = r.from_planet_fid
+        JOIN planets tp ON tp.FID = r.to_planet_fid
+        {where_sql}
+        {order_sql}
+        LIMIT ?
+        "#
+    );
+
+    // limit is always last parameter
+    params.push(Box::new(limit as i64));
+
+    let mut stmt = con.prepare(&sql)?;
+
+    // Convert Vec<Box<dyn ToSql>> to slice of &dyn ToSql
+    let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref() as &dyn ToSql).collect();
+
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(RouteListRow {
+                id: row.get("id")?,
+                from_planet_fid: row.get("from_planet_fid")?,
+                from_planet_name: row.get("from_planet_name")?,
+                to_planet_fid: row.get("to_planet_fid")?,
+                to_planet_name: row.get("to_planet_name")?,
+                status: row.get("status")?,
+                length: row.get("length")?,
+                iterations: row.get("iterations")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+                waypoints_count: row.get("waypoints_count")?,
+                detours_count: row.get("detours_count")?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows)
 }

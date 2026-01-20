@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.2] – 2026-01-20
+
+### ✨ New Features
+
+- Added `route list` command to list persisted routes
+- Introduced advanced filtering options for `route list`:
+    - `--status <status>`
+    - `--from <planet_fid>`
+    - `--to <planet_fid>`
+- Added configurable sorting for route listing via `--sort`:
+    - `updated` (default)
+    - `id`
+    - `length`
+- Added JSON export support for route listing:
+    - `route list --json`
+    - `route list --json --file <path>`
+
+### 🎨 UX Improvements
+
+- Colorized `route list` output using the unified CLI color policy
+- Clear visual distinction between:
+    - successful routes
+    - routes with detours
+    - zero-count values (dimmed)
+- Consistent behavior between stdout JSON export and file-based export
+
+### 🛠 Internal / Refactoring
+
+- Introduced `RouteListOptions` struct to group list parameters and satisfy Clippy constraints
+- Refactored dynamic SQL generation for route listing with:
+    - safe, optional `WHERE` clauses
+    - whitelisted `ORDER BY` clauses
+- Fixed SQL parameter binding mismatch in dynamically generated queries
+- Improved robustness of file output handling (parent directory creation)
+
+### 🐛 Bug Fixes
+
+- Fixed incorrect SQL parameter count when using filtered `route list`
+- Fixed path parent handling when exporting JSON to file
+
+### ⚠️ Notes
+
+- `route list` is backward-compatible with existing databases
+- JSON export produces clean machine-readable output with no extra text on stdout
+
+---
+
 ## [0.6.1] – 2026-01-20
 
 ### ✨ New Commands

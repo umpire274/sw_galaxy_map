@@ -200,3 +200,22 @@ pub struct RouteOptionsJson {
     pub proximity_weight: f64,
     pub proximity_margin: f64,
 }
+
+#[derive(Debug, Clone)]
+pub struct RouteListRow {
+    pub id: i64,
+    pub from_planet_fid: i64,
+    pub from_planet_name: String,
+    pub to_planet_fid: i64,
+    pub to_planet_name: String,
+
+    pub status: String,
+    pub length: Option<f64>,
+    pub iterations: Option<i64>,
+
+    pub created_at: String,
+    pub updated_at: Option<String>,
+
+    pub waypoints_count: i64,
+    pub detours_count: i64,
+}

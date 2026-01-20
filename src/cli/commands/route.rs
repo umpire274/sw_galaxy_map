@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
-use crate::cli::args::{RouteCmd, RouteComputeArgs};
+use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteListSort};
 use crate::cli::color::Colors;
 use crate::cli::export::{
     ExplainClosest, ExplainDetour, ExplainDominantPenalty, ExplainEndpoint, ExplainExport,
@@ -33,6 +33,27 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
         RouteCmd::Clear { yes } => run_clear(con, *yes),
         RouteCmd::Prune => run_prune(con),
         RouteCmd::Last { from, to } => run_last(con, from, to),
+        RouteCmd::List {
+            json,
+            file,
+            limit,
+            status,
+            from,
+            to,
+            sort,
+        } => {
+            let opts = RouteListOptions {
+                json: *json,
+                file: file.as_deref(),
+                limit: *limit,
+                status: status.as_deref(),
+                from: *from,
+                to: *to,
+                sort: *sort,
+            };
+
+            run_list(con, opts)
+        }
     }
 }
 
@@ -423,29 +444,29 @@ fn run_explain(con: &Connection, route_id: i64, json: bool, file: Option<&Path>)
         }
 
         let export = ExplainExport {
-                route: ExplainRouteMeta {
-                    id: loaded.route.id,
-                    from: ExplainEndpoint {
-                        fid: loaded.route.from_planet_fid,
-                        name: loaded.route.from_planet_name.clone(),
-                    },
-                    to: ExplainEndpoint {
-                        fid: loaded.route.to_planet_fid,
-                        name: loaded.route.to_planet_name.clone(),
-                    },
-                    status: loaded.route.status.clone(),
-                    length_parsec: loaded.route.length,
-                    iterations: loaded.route.iterations,
-                    created_at: loaded.route.created_at.clone(),
-                    updated_at: loaded.route.updated_at.clone(),
+            route: ExplainRouteMeta {
+                id: loaded.route.id,
+                from: ExplainEndpoint {
+                    fid: loaded.route.from_planet_fid,
+                    name: loaded.route.from_planet_name.clone(),
                 },
-                options: opts.clone(),
-                detours: detours_out,
-                note: ExplainNote {
-                    text: "The above detour explanation reflects the state at the time of route computation. Subsequent changes to route parameters or obstacle data will not be reflected here.".to_string(),
-                    units: "parsec".to_string(),
+                to: ExplainEndpoint {
+                    fid: loaded.route.to_planet_fid,
+                    name: loaded.route.to_planet_name.clone(),
                 },
-            };
+                status: loaded.route.status.clone(),
+                length_parsec: loaded.route.length,
+                iterations: loaded.route.iterations,
+                created_at: loaded.route.created_at.clone(),
+                updated_at: loaded.route.updated_at.clone(),
+            },
+            options: opts.clone(),
+            detours: detours_out,
+            note: ExplainNote {
+                text: "The above detour explanation reflects the state at the time of route computation. Subsequent changes to route parameters or obstacle data will not be reflected here.".to_string(),
+                units: "parsec".to_string(),
+            },
+        };
 
         // JSON only, no colors, stdout
         let s = serde_json::to_string_pretty(&export)?;
@@ -770,6 +791,147 @@ fn run_prune(con: &mut Connection) -> Result<()> {
 
     println!("  route_detours:   {}", detours_out);
     println!("  route_waypoints: {}", waypoints_out);
+
+    Ok(())
+}
+
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+struct RouteListExport {
+    routes: Vec<RouteListItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct RouteListItem {
+    id: i64,
+    from: RouteListEndpoint,
+    to: RouteListEndpoint,
+    status: String,
+    length_parsec: Option<f64>,
+    iterations: Option<i64>,
+    created_at: String,
+    updated_at: Option<String>,
+    waypoints_count: i64,
+    detours_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct RouteListEndpoint {
+    fid: i64,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct RouteListOptions<'a> {
+    pub json: bool,
+    pub file: Option<&'a Path>,
+    pub limit: usize,
+    pub status: Option<&'a str>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub sort: RouteListSort,
+}
+
+fn run_list(con: &Connection, opts: RouteListOptions<'_>) -> Result<()> {
+    // implementation
+    let style = Style::default();
+    let c = Colors::new(&style);
+
+    let rows = queries::list_routes(con, opts.limit, opts.status, opts.from, opts.to, opts.sort)?;
+
+    if opts.json {
+        let export = RouteListExport {
+            routes: rows
+                .into_iter()
+                .map(|r| RouteListItem {
+                    id: r.id,
+                    from: RouteListEndpoint {
+                        fid: r.from_planet_fid,
+                        name: r.from_planet_name,
+                    },
+                    to: RouteListEndpoint {
+                        fid: r.to_planet_fid,
+                        name: r.to_planet_name,
+                    },
+                    status: r.status,
+                    length_parsec: r.length,
+                    iterations: r.iterations,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                    waypoints_count: r.waypoints_count,
+                    detours_count: r.detours_count,
+                })
+                .collect(),
+        };
+
+        let s = serde_json::to_string_pretty(&export)?;
+
+        if let Some(path) = opts.file {
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                fs::create_dir_all(parent)?;
+            }
+            let mut f = fs::File::create(path)?;
+            f.write_all(s.as_bytes())?;
+            f.write_all(b"\n")?;
+            eprintln!("JSON written to {}", path.display());
+        } else {
+            println!("{}", s);
+        }
+
+        return Ok(());
+    }
+
+    // Text output (colored)
+    println!("{}", c.ok("Routes:"));
+    if rows.is_empty() {
+        println!("{}", c.dim("(none)"));
+        return Ok(());
+    }
+
+    // Header
+    println!(
+        "{:>6}  {:<24}  {:<24}  {:<8}  {:>10}  {:>6}  {:>4}  {:>4}  UPDATED",
+        "ID", "FROM", "TO", "STATUS", "LENGTH", "ITERS", "WP", "DET"
+    );
+
+    for r in rows {
+        let from = format!("{} [{}]", r.from_planet_name, r.from_planet_fid);
+        let to = format!("{} [{}]", r.to_planet_name, r.to_planet_fid);
+
+        let status = if r.status == "ok" {
+            c.ok(&r.status)
+        } else {
+            c.err(&r.status)
+        };
+
+        let len_txt = r
+            .length
+            .map(|v| format!("{:.3}", v))
+            .unwrap_or_else(|| "-".to_string());
+        let it_txt = r
+            .iterations
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+
+        let upd = r.updated_at.clone().unwrap_or_else(|| r.created_at.clone());
+
+        let wp_txt = if r.waypoints_count == 0 {
+            c.dim(r.waypoints_count.to_string())
+        } else {
+            c.warn(r.waypoints_count.to_string())
+        };
+        let det_txt = if r.detours_count == 0 {
+            c.dim(r.detours_count.to_string())
+        } else {
+            c.warn(r.detours_count.to_string())
+        };
+
+        println!(
+            "{:>6}  {:<24}  {:<24}  {:<8}  {:>10}  {:>6}  {:>4}  {:>4}  {}",
+            r.id, from, to, status, len_txt, it_txt, wp_txt, det_txt, upd
+        );
+    }
 
     Ok(())
 }
