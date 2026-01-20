@@ -1,4 +1,4 @@
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -212,6 +212,13 @@ pub enum WaypointCmd {
     },
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum RouteListSort {
+    Updated,
+    Id,
+    Length,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum RouteCmd {
     /// Compute and persist a route between two planets (name or alias)
@@ -255,6 +262,34 @@ pub enum RouteCmd {
 
     /// Prune orphan rows in route_waypoints / route_detours not linked to any route
     Prune,
+
+    // ...
+    List {
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        json: bool,
+
+        #[arg(long, requires = "json")]
+        file: Option<std::path::PathBuf>,
+
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+
+        /// Filter by status (e.g. ok, failed)
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Filter by FROM planet fid
+        #[arg(long)]
+        from: Option<i64>,
+
+        /// Filter by TO planet fid
+        #[arg(long)]
+        to: Option<i64>,
+
+        /// Sort field (updated|id|length). Default: updated
+        #[arg(long, value_enum, default_value_t = RouteListSort::Updated)]
+        sort: RouteListSort,
+    },
 }
 
 #[derive(Args, Debug)]
