@@ -1,9 +1,9 @@
 use anyhow::{Result, bail};
 use owo_colors::OwoColorize;
 use rusqlite::Connection;
-use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::{fs, io};
 
 use crate::cli::args::{RouteCmd, RouteComputeArgs};
 use crate::cli::color::Colors;
@@ -30,6 +30,8 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
             json,
             file,
         } => run_explain(con, *route_id, *json, file.as_deref()),
+        RouteCmd::Clear { yes } => run_clear(con, *yes),
+        RouteCmd::Prune => run_prune(con),
         RouteCmd::Last { from, to } => run_last(con, from, to),
     }
 }
@@ -668,4 +670,106 @@ fn run_last(con: &Connection, from: &str, to: &str) -> Result<()> {
     })?;
 
     run_show(con, r.id)
+}
+
+fn confirm_destructive(action: &str) -> Result<bool> {
+    let style = Style::default();
+    let c = Colors::new(&style);
+
+    // Messaggio volutamente esplicito e “hard to misread”
+    eprintln!("{}", c.warn("⚠️  DESTRUCTIVE OPERATION"));
+    eprintln!("{}", c.warn(action));
+    println!();
+    eprintln!("Type YES to continue, or anything else to abort.");
+    eprint!("> ");
+    io::stderr().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().eq_ignore_ascii_case("YES"))
+}
+
+fn run_clear(con: &mut Connection, yes: bool) -> Result<()> {
+    let style = Style::default();
+    let c = Colors::new(&style);
+
+    if !yes {
+        let action =
+            "This will DELETE ALL routes, route waypoints, and route detours from the database.";
+
+        if !confirm_destructive(action)? {
+            bail!("Aborted by user.");
+        }
+    }
+
+    let tx = con.transaction()?;
+
+    let detours_deleted = tx.execute("DELETE FROM route_detours", [])?;
+    let waypoints_deleted = tx.execute("DELETE FROM route_waypoints", [])?;
+    let routes_deleted = tx.execute("DELETE FROM routes", [])?;
+
+    tx.commit()?;
+
+    println!("{}", c.ok("Routes cleared:"));
+    println!(
+        "  route_detours:   {}",
+        c.warn(format!("{} rows deleted", detours_deleted))
+    );
+    println!(
+        "  route_waypoints: {}",
+        c.warn(format!("{} rows deleted", waypoints_deleted))
+    );
+    println!(
+        "  routes:          {}",
+        c.warn(format!("{} rows deleted", routes_deleted))
+    );
+
+    Ok(())
+}
+
+fn run_prune(con: &mut Connection) -> Result<()> {
+    let style = Style::default();
+    let c = Colors::new(&style);
+
+    let tx = con.transaction()?;
+
+    let detours_deleted = tx.execute(
+        r#"
+        DELETE FROM route_detours
+        WHERE route_id NOT IN (SELECT id FROM routes)
+        "#,
+        [],
+    )?;
+
+    let waypoints_deleted = tx.execute(
+        r#"
+        DELETE FROM route_waypoints
+        WHERE route_id NOT IN (SELECT id FROM routes)
+        "#,
+        [],
+    )?;
+
+    tx.commit()?;
+
+    println!("{}", c.ok("Prune completed:"));
+
+    let detours_txt = format!("{} orphan rows deleted", detours_deleted);
+    let waypoints_txt = format!("{} orphan rows deleted", waypoints_deleted);
+
+    let detours_out = if detours_deleted == 0 {
+        c.dim(detours_txt)
+    } else {
+        c.warn(detours_txt)
+    };
+
+    let waypoints_out = if waypoints_deleted == 0 {
+        c.dim(waypoints_txt)
+    } else {
+        c.warn(waypoints_txt)
+    };
+
+    println!("  route_detours:   {}", detours_out);
+    println!("  route_waypoints: {}", waypoints_out);
+
+    Ok(())
 }

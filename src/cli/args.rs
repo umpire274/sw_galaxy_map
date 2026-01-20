@@ -245,6 +245,16 @@ pub enum RouteCmd {
         /// Destination planet name (or alias)
         to: String,
     },
+
+    /// Clear all persisted routes (routes, waypoints, detours)
+    Clear {
+        /// Skip interactive confirmation prompt (destructive)
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        yes: bool,
+    },
+
+    /// Prune orphan rows in route_waypoints / route_detours not linked to any route
+    Prune,
 }
 
 #[derive(Args, Debug)]

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.1] – 2026-01-20
+
+### ✨ New Commands
+
+- Added `route clear` command to delete all persisted routing data:
+    - `routes`
+    - `route_waypoints`
+    - `route_detours`
+- Added interactive confirmation for destructive operations, with optional `--yes` flag for non-interactive usage
+- Added `route prune` command to remove orphan rows in routing tables
+  (`route_waypoints` and `route_detours` not linked to any route)
+
+### 🎨 UX Improvements
+
+- Introduced colorized output for `route clear` and `route prune`, consistent with the unified CLI color policy:
+    - destructive actions highlighted in red
+    - successful operations in green
+    - zero-effect operations dimmed
+    - partial cleanups highlighted in yellow
+- Improved user feedback for aborted destructive operations
+
+### 🛠 Internal / Refactoring
+
+- Reused centralized `confirm_destructive()` helper to avoid duplicated confirmation logic
+- Ensured routing cleanup commands never affect galaxy/domain data
+  (`waypoints`, `waypoint_planets`, `planets` remain untouched)
+- Improved robustness of maintenance commands against disabled foreign key constraints
+
+### ⚠️ Notes
+
+- `route prune` is a safe housekeeping operation and does not require confirmation
+- Both commands are backward-compatible and do not affect existing route computation logic
+
+---
+
 ## [0.6.0] – 2026-01-20
 
 ### ✨ New Features
