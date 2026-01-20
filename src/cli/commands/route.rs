@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use owo_colors::OwoColorize;
 use rusqlite::Connection;
 use std::fs;
@@ -17,7 +17,7 @@ use crate::normalize::normalize_text;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
 use crate::routing::route_debug::debug_print_route;
-use crate::routing::router::{compute_route, RouteOptions};
+use crate::routing::router::{RouteOptions, compute_route};
 
 use crate::ui::Style;
 
@@ -449,10 +449,10 @@ fn run_explain(con: &Connection, route_id: i64, json: bool, file: Option<&Path>)
         let s = serde_json::to_string_pretty(&export)?;
 
         if let Some(path) = file {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent)?;
-                }
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent)?;
             }
 
             let mut f = fs::File::create(path)?;

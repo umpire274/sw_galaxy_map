@@ -235,7 +235,6 @@ pub enum RouteCmd {
         /// Write JSON to file (absolute or relative path). Requires --json.
         #[arg(long, requires = "json")]
         file: Option<std::path::PathBuf>,
-
     },
 
     /// Show the current persisted route for a FROM→TO pair (unique in schema v8)
