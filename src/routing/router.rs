@@ -14,6 +14,7 @@ pub struct DetourDecision {
 
     /// Obstacle being bypassed
     pub obstacle_id: i64,
+    pub obstacle_name: String,
     pub obstacle_center: Point,
     pub obstacle_radius: f64,
 
@@ -30,6 +31,14 @@ pub struct DetourDecision {
 
     /// Score breakdown for the chosen waypoint
     pub score: CandidateScore,
+
+    /// Number of offset-try iterations consumed before a valid detour was found.
+    /// This is provable and can be persisted for `route explain`.
+    pub tries_used: usize,
+
+    /// True if the solution was found only on the last allowed try (`tries_used == max_offset_tries`).
+    /// This makes "limited by max_offset_tries" provable.
+    pub tries_exhausted: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,11 +48,11 @@ pub struct RouteOptions {
     pub max_offset_tries: usize,
     pub offset_growth: f64,
 
-    // NEW: scoring
+    // scoring
     pub turn_weight: f64, // penalizza angoli stretti (gomiti)
     pub back_weight: f64, // penalizza "tornare indietro"
 
-    // NEW: proximity scoring
+    // proximity scoring
     pub proximity_weight: f64, // intensità penalità
     pub proximity_margin: f64, // fascia extra oltre il raggio (warning band)
 }
@@ -82,6 +91,7 @@ pub struct CandidateScore {
 }
 
 impl CandidateScore {
+    #[inline]
     pub fn total(&self) -> f64 {
         self.base + self.turn + self.back + self.proximity
     }
@@ -96,8 +106,7 @@ fn detour_candidates(a: Point, b: Point, hit: &Hit, offset: f64) -> Vec<Point> {
     let d = hit.closest.dist;
 
     // vettore "outward": dal centro verso Q
-    let mut u = sub(q, c);
-    u = normalize(u);
+    let u = normalize(sub(q, c));
 
     // quanto serve per portarsi a r+clearance partendo da distanza d
     // (se d è già > r, questo vale ~0, ma hit in genere ha d < r)
@@ -146,10 +155,8 @@ fn evaluate_candidate(
     let base = dist(a, w) + dist(w, b);
 
     // --- turn penalty
-    let v1 = sub(w, a);
-    let v2 = sub(b, w);
-    let u1 = normalize(v1);
-    let u2 = normalize(v2);
+    let u1 = normalize(sub(w, a));
+    let u2 = normalize(sub(b, w));
 
     let mut turn = 0.0;
     if !(u1.x == 0.0 && u1.y == 0.0 || u2.x == 0.0 && u2.y == 0.0) {
@@ -207,6 +214,14 @@ pub fn compute_route(
         });
     }
 
+    // Guardrails: avoid degenerate configs
+    if opts.max_offset_tries == 0 {
+        bail!("Invalid RouteOptions: max_offset_tries must be >= 1");
+    }
+    if opts.offset_growth <= 1.0 {
+        bail!("Invalid RouteOptions: offset_growth must be > 1.0");
+    }
+
     let mut waypoints = vec![start, end];
     let mut detours: Vec<DetourDecision> = Vec::new();
     let mut iterations = 0usize;
@@ -215,7 +230,7 @@ pub fn compute_route(
         // 1) Find first colliding segment
         let mut first_collision: Option<(usize, Hit)> = None;
 
-        for seg_idx in 0..waypoints.len() - 1 {
+        for seg_idx in 0..(waypoints.len() - 1) {
             let a = waypoints[seg_idx];
             let b = waypoints[seg_idx + 1];
 
@@ -243,16 +258,16 @@ pub fn compute_route(
         // 2) Find best detour candidate (with expanding offset)
         let base_offset = hit.obstacle_radius + opts.clearance;
 
-        let mut best_wp: Option<Point> = None;
-        let mut best_score: Option<CandidateScore> = None;
-        let mut best_offset_used: Option<f64> = None;
+        let mut best: Option<(Point, CandidateScore, f64, usize, bool)> = None;
+        // (waypoint, score, offset_used, try_index, exhausted_at_selection)
 
         let mut offset = base_offset;
         let mut last_candidates: Vec<Point> = Vec::new();
 
-        for _try_idx in 0..opts.max_offset_tries {
+        for try_idx in 0..opts.max_offset_tries {
             let candidates = detour_candidates(a, b, &hit, offset);
             last_candidates = candidates.clone();
+
             for w in candidates {
                 let Some(score) =
                     evaluate_candidate(a, w, b, obstacles, opts, Some(hit.obstacle_id))
@@ -260,28 +275,29 @@ pub fn compute_route(
                     continue;
                 };
 
-                let better = match &best_score {
+                let better = match &best {
                     None => true,
-                    Some(s) => score.total() < s.total(),
+                    Some((_bw, bs, _bo, _bi, _be)) => score.total() < bs.total(),
                 };
 
                 if better {
-                    best_wp = Some(w);
-                    best_score = Some(score);
-                    best_offset_used = Some(offset);
+                    let exhausted = (try_idx + 1) == opts.max_offset_tries;
+                    best = Some((w, score, offset, try_idx, exhausted));
                 }
             }
 
-            if best_wp.is_some() {
+            // As soon as we found a valid candidate at this offset,
+            // we stop expanding offsets (keep the best among this offset's candidates).
+            if best.is_some() {
                 break;
             }
 
             offset *= opts.offset_growth;
         }
 
-        let (detour_wp, detour_score, offset_used) = match (best_wp, best_score, best_offset_used) {
-            (Some(wp), Some(sc), Some(off)) => (wp, sc, off),
-            _ => {
+        let (detour_wp, detour_score, offset_used, try_idx, exhausted) = match best {
+            Some(v) => v,
+            None => {
                 debug_failed_detour(a, b, &hit, &last_candidates, obstacles);
                 bail!(
                     "No valid detour found for obstacle id={} (segment idx={})",
@@ -291,19 +307,37 @@ pub fn compute_route(
             }
         };
 
+        // These two values make the "limited by max_offset_tries" statement provable.
+        let tries_used = try_idx + 1;
+        let tries_exhausted = exhausted;
+
         // 3) Record detour decision (before inserting)
+        let obstacle_name = obstacles
+            .iter()
+            .find(|o| o.id == hit.obstacle_id)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| "<unknown>".to_string());
+
         detours.push(DetourDecision {
             iteration: iterations,
             segment_index: seg_idx,
+
             obstacle_id: hit.obstacle_id,
+            obstacle_name,
             obstacle_center: hit.obstacle_center,
             obstacle_radius: hit.obstacle_radius,
+
             closest_t: hit.closest.t,
             closest_q: hit.closest.q,
             closest_dist: hit.closest.dist,
+
             offset_used,
             waypoint: detour_wp,
-            score: detour_score.clone(),
+
+            score: detour_score,
+
+            tries_used,
+            tries_exhausted,
         });
 
         // 4) Apply detour

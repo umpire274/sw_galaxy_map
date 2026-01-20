@@ -3,6 +3,7 @@ use crate::routing::geometry::*;
 #[derive(Debug, Clone)]
 pub struct Obstacle {
     pub id: i64,
+    pub name: String,
     pub center: Point,
     pub radius: f64,
 }

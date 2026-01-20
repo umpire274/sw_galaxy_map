@@ -1,6 +1,6 @@
-use rusqlite::{Result as SqlResult, Row};
-
 use crate::utils::wiki::fandom_planet_url;
+use rusqlite::{Result as SqlResult, Row};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct Planet {
@@ -164,6 +164,9 @@ pub struct RouteDetourRow {
     pub score_back: f64,
     pub score_proximity: f64,
     pub score_total: f64,
+
+    pub tries_used: Option<i64>,
+    pub tries_exhausted: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -171,4 +174,29 @@ pub struct RouteLoaded {
     pub route: RouteRow,
     pub waypoints: Vec<RouteWaypointRow>,
     pub detours: Vec<RouteDetourRow>,
+}
+
+/// A lightweight view of an obstacle used by the routing engine.
+///
+/// We use a named struct rather than a large tuple to keep the API readable and
+/// to avoid triggering `clippy::type_complexity` when `-D warnings` is enabled.
+#[derive(Debug, Clone)]
+pub struct RoutingObstacleRow {
+    pub fid: i64,
+    pub planet: String,
+    pub x: f64,
+    pub y: f64,
+    pub radius: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RouteOptionsJson {
+    pub clearance: f64,
+    pub max_iters: usize,
+    pub max_offset_tries: usize,
+    pub offset_growth: f64,
+    pub turn_weight: f64,
+    pub back_weight: f64,
+    pub proximity_weight: f64,
+    pub proximity_margin: f64,
 }

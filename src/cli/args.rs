@@ -223,6 +223,21 @@ pub enum RouteCmd {
         route_id: i64,
     },
 
+    /// Explain a persisted route detours (why/what/how) by id
+    Explain {
+        /// Route id
+        route_id: i64,
+
+        /// Export explanation as JSON (stdout)
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        json: bool,
+
+        /// Write JSON to file (absolute or relative path). Requires --json.
+        #[arg(long, requires = "json")]
+        file: Option<std::path::PathBuf>,
+
+    },
+
     /// Show the current persisted route for a FROM→TO pair (unique in schema v8)
     Last {
         /// Start planet name (or alias)

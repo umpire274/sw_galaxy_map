@@ -12,6 +12,7 @@ fn route_with_single_obstacle_creates_detour() {
 
     let obstacles = vec![Obstacle {
         id: 1,
+        name: "Prakith".to_string(),
         center: Point::new(5.0, 0.0),
         radius: 0.6,
     }];
