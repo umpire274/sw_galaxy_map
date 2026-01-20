@@ -2,7 +2,7 @@ use crate::ui;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 fn column_exists(tx: &Transaction<'_>, table: &str, col: &str) -> Result<bool> {
     let sql = format!("PRAGMA table_info({})", table);
@@ -268,6 +268,30 @@ fn m_to_v8(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn m_to_v9(tx: &Transaction<'_>) -> Result<()> {
+    // No changes in v9 yet
+    if !column_exists(tx, "route_detours", "tries_used")? {
+        tx.execute_batch(
+            r#"
+            ALTER TABLE route_detours
+            ADD COLUMN tries_used INTEGER;
+            "#,
+        )
+        .context("Failed to add route_detours.tries_used")?;
+    }
+
+    if !column_exists(tx, "route_detours", "tries_exhausted")? {
+        tx.execute_batch(
+            r#"
+            ALTER TABLE route_detours ADD COLUMN tries_exhausted INTEGER NOT NULL DEFAULT 0;
+            "#,
+        )
+        .context("Failed to add route_detours.tries_exhausted")?;
+    }
+
+    Ok(())
+}
+
 /// Run schema migrations up to SCHEMA_VERSION.
 /// Idempotent and safe to call on every startup/open.
 pub fn run(con: &mut Connection) -> Result<()> {
@@ -331,6 +355,13 @@ pub fn run(con: &mut Connection) -> Result<()> {
         m_to_v8(&tx)?;
         meta_upsert(&tx, "schema_version", "8")?;
         ui::success("Migration v7 → v8 completed");
+    }
+
+    if current < 9 {
+        ui::info("Applying migration: v8 → v9 (route_detours tries_used + tries_exhausted)");
+        m_to_v9(&tx)?;
+        meta_upsert(&tx, "schema_version", "9")?;
+        ui::success("Migration v8 → v9 completed");
     }
 
     tx.commit().context("Failed to commit migration")?;

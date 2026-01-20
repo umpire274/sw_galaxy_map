@@ -1,5 +1,7 @@
 pub mod args;
+pub mod color;
 pub mod commands;
+pub mod export;
 
 use crate::db::db_status::resolve_db_path;
 use crate::ui::warning;

@@ -13,11 +13,13 @@ fn route_with_multiple_obstacles_is_safe() {
     let obstacles = vec![
         Obstacle {
             id: 1,
+            name: "Prakith".to_string(),
             center: Point::new(4.0, 0.0),
             radius: 0.6,
         },
         Obstacle {
             id: 2,
+            name: "Keeara Major".to_string(),
             center: Point::new(8.0, 0.0),
             radius: 0.6,
         },

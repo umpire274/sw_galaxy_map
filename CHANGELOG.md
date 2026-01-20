@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] – 2026-01-20
+
+### ✨ New Features
+
+- Introduced **explainable routing** with the new `route explain <id>` command
+- Added **detour telemetry** (`tries_used`, `tries_exhausted`) to make routing decisions provable
+- Implemented **JSON export** for route explanations via `route explain --json`
+- Added support for **file output** with `--file <path>` when exporting JSON
+- Unified and centralized **CLI color policy** across `route show` and `route explain`
+- Enhanced CLI output with **context-aware coloring** (start/end, obstacles, detours, scores)
+- Added explanatory footer notes to clarify routing invariants and units
+
+### 🧠 Improvements
+
+- Refactored routing engine to propagate decision telemetry from runtime to persistence
+- Improved detour scoring diagnostics with dominant penalty identification
+- Hardened route explanation against legacy routes (partial telemetry)
+- Improved robustness of DB loading for extended detour metadata
+
+### 🛠 Internal / Refactoring
+
+- Added shared `cli::color` helpers to avoid duplicated color logic
+- Cleaned up complex CLI output code paths to avoid temporary borrow issues
+- Improved route explanation structure for future machine consumption (JSON schema-ready)
+
+### ⚠️ Backward Compatibility
+
+- Existing routes computed before v0.6.0 remain readable and explainable
+  (telemetry fields may be reported as `n/a`)
+
+---
+
 ## [0.5.3] – 2026-01-19
 
 ### ✨ Routing & Persistence

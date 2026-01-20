@@ -1,5 +1,5 @@
 use crate::db::has_table;
-use crate::model::{AliasRow, NearHit, Planet, Waypoint, WaypointPlanetLink};
+use crate::model::{AliasRow, NearHit, Planet, RoutingObstacleRow, Waypoint, WaypointPlanetLink};
 use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
@@ -609,6 +609,63 @@ pub fn list_planets_in_bbox(
     Ok(out)
 }
 
+/// Returns routing obstacles marked via `waypoint_planets.role`.
+///
+/// Project choice ("option 2"): **any** waypoint may mark a planet as an obstacle.
+///
+/// Roles considered obstacles: `avoid`, `danger`, `interdiction` (case-insensitive).
+/// Radius is computed as `MAX(COALESCE(waypoint_planets.distance, default_radius))`.
+///
+/// The bbox is a cheap prefilter for performance.
+pub fn list_routing_obstacles_in_bbox(
+    con: &Connection,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+    limit: usize,
+    default_radius: f64,
+) -> Result<Vec<RoutingObstacleRow>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT
+          p.FID   AS fid,
+          p.Planet AS planet,
+          p.X     AS x,
+          p.Y     AS y,
+          MAX(COALESCE(wpl.distance, ?6)) AS radius
+        FROM waypoint_planets wpl
+        JOIN planets p ON p.FID = wpl.planet_fid
+        WHERE p.deleted = 0
+          AND lower(wpl.role) IN ('avoid','danger','interdiction')
+          AND p.X BETWEEN ?1 AND ?2
+          AND p.Y BETWEEN ?3 AND ?4
+        GROUP BY p.FID, p.Planet, p.X, p.Y
+        ORDER BY radius DESC, p.Planet COLLATE NOCASE
+        LIMIT ?5
+        "#,
+    )?;
+
+    let rows = stmt.query_map(
+        rusqlite::params![min_x, max_x, min_y, max_y, limit as i64, default_radius],
+        |r| {
+            Ok(RoutingObstacleRow {
+                fid: r.get(0)?,
+                planet: r.get(1)?,
+                x: r.get(2)?,
+                y: r.get(3)?,
+                radius: r.get(4)?,
+            })
+        },
+    )?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 fn round4(v: f64) -> f64 {
     (v * 10_000.0).round() / 10_000.0
 }
@@ -667,7 +724,8 @@ pub fn insert_route_detour(
           closest_t, closest_qx, closest_qy, closest_dist,
           offset_used,
           wp_x, wp_y, waypoint_id,
-          score_base, score_turn, score_back, score_proximity, score_total
+          score_base, score_turn, score_back, score_proximity, score_total,
+          tries_used, tries_exhausted
         ) VALUES (
           ?1, ?2,
           ?3, ?4,
@@ -675,7 +733,8 @@ pub fn insert_route_detour(
           ?9, ?10, ?11, ?12,
           ?13,
           ?14, ?15, ?16,
-          ?17, ?18, ?19, ?20, ?21
+          ?17, ?18, ?19, ?20, ?21,
+          ?22, ?23
         )
         "#,
         params![
@@ -699,7 +758,9 @@ pub fn insert_route_detour(
             d.score.turn,
             d.score.back,
             d.score.proximity,
-            total
+            total,
+            d.tries_used as i64,
+            d.tries_exhausted as i64,
         ],
     )?;
 
@@ -911,6 +972,9 @@ fn route_detour_from_row(r: &Row<'_>) -> rusqlite::Result<RouteDetourRow> {
         score_back: r.get("score_back")?,
         score_proximity: r.get("score_proximity")?,
         score_total: r.get("score_total")?,
+
+        tries_used: r.get("tries_used")?,
+        tries_exhausted: r.get("tries_exhausted")?,
     })
 }
 
@@ -1018,7 +1082,9 @@ pub fn load_route(con: &Connection, route_id: i64) -> Result<Option<RouteLoaded>
           d.score_turn       AS score_turn,
           d.score_back       AS score_back,
           d.score_proximity  AS score_proximity,
-          d.score_total      AS score_total
+          d.score_total      AS score_total,
+          d.tries_used       AS tries_used,
+          d.tries_exhausted  AS tries_exhausted
         FROM route_detours d
         LEFT JOIN planets p ON p.FID = d.obstacle_id
         WHERE d.route_id = ?1

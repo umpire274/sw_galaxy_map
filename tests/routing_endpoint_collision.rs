@@ -13,6 +13,7 @@ fn route_allows_destination_endpoint_collision() {
     // Obstacle exactly at destination. With endpoint-safe logic, this must not prevent routing.
     let obstacles = vec![Obstacle {
         id: 99,
+        name: "Tepasi".to_string(),
         center: end,
         radius: 2.0,
     }];
