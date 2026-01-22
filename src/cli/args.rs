@@ -4,7 +4,12 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "sw_galaxy_map",
     version,
-    about = "CLI to query the Star Wars galaxy map (SQLite)"
+    about = "CLI to query the Star Wars galaxy map (SQLite)",
+    long_about = "\
+Command-line and graphical navicomputer for exploring the Star Wars galaxy.
+
+Run without arguments to start the graphical navicomputer interface.
+"
 )]
 pub struct Cli {
     /// Path to the SQLite database

@@ -28,6 +28,12 @@ pub struct NavicomputerApp {
     boot_lines: Vec<&'static str>,
     boot_step: usize,           // index of current displayed line
     boot_next: Option<Instant>, // when to advance to next line
+
+    // DB connection status (GUI-level, not the actual pool)
+    db_connected: bool,
+
+    status_deadline: Option<Instant>,
+    ready_status: &'static str,
 }
 
 impl NavicomputerApp {
@@ -60,6 +66,11 @@ impl NavicomputerApp {
             boot_lines,
             boot_step: 0,
             boot_next: Some(Instant::now() + Duration::from_millis(300)),
+
+            db_connected: true,
+
+            ready_status: "Navicomputer ready. All systems are online.",
+            status_deadline: None,
         }
     }
 
@@ -73,7 +84,11 @@ impl NavicomputerApp {
     }
 
     fn can_compute(&self) -> bool {
-        !self.from.trim().is_empty() && !self.to.trim().is_empty() && !self.computing
+        if self.computing {
+            return false;
+        }
+        let (from, to) = self.normalized_from_to();
+        !from.is_empty() && !to.is_empty() && !from.eq_ignore_ascii_case(&to)
     }
 
     fn can_export(&self) -> bool {
@@ -114,10 +129,25 @@ impl NavicomputerApp {
     fn compute_route_stub(&mut self) {
         self.computing = true;
         self.error = None;
-        self.status = "Computing route...".to_string();
+        self.set_status("Computing route...");
 
-        let from = self.from.trim().to_string();
-        let to = self.to.trim().to_string();
+        let (from, to) = self.normalized_from_to();
+
+        if from.is_empty() || to.is_empty() {
+            self.set_status_ttl("FROM and TO must be provided.", Duration::from_secs(4));
+            self.computing = false;
+            return;
+        }
+
+        if from.eq_ignore_ascii_case(&to) {
+            self.set_status_ttl("FROM and TO must be different.", Duration::from_secs(4));
+            self.computing = false;
+            return;
+        }
+
+        // opzionale: scrivi indietro i valori normalizzati così l’utente vede la forma “pulita”
+        self.from = from.clone();
+        self.to = to.clone();
 
         self.output = format!(
             "Route — {} → {}\n\n(placeholder)\n- compute not wired yet\n",
@@ -135,7 +165,7 @@ impl NavicomputerApp {
         self.last_json =
             Some(serde_json::to_string_pretty(&json_obj).unwrap_or_else(|_| "{}".to_string()));
 
-        self.status = "Route computation completed.".to_string();
+        self.set_status_ttl("Route computation completed.", Duration::from_secs(5));
         self.computing = false;
     }
 
@@ -155,13 +185,16 @@ impl NavicomputerApp {
         if let Some(path) = path {
             if let Err(e) = std::fs::write(&path, format!("{}\n", json)) {
                 self.error = Some(format!("Failed to write file: {} ({})", path.display(), e));
-                self.status = "Export failed.".to_string();
+                self.set_status_ttl("Export failed.", Duration::from_secs(6));
             } else {
                 self.error = None;
-                self.status = format!("Export completed: {}", path.display());
+                self.set_status_ttl(
+                    format!("Export completed: {}", path.display()).to_string(),
+                    Duration::from_secs(5),
+                );
             }
         } else {
-            self.status = "Export cancelled.".to_string();
+            self.set_status_ttl("Export cancelled.", Duration::from_secs(3));
         }
     }
 
@@ -212,6 +245,107 @@ impl NavicomputerApp {
             ctx.request_repaint();
         }
     }
+
+    fn app_version() -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+
+    fn update_window_title(&self, ctx: &egui::Context) {
+        let base = "SW Galaxy Map — Navicomputer";
+        let from = self.from.trim();
+        let to = self.to.trim();
+
+        let title = if self.computing {
+            if !from.is_empty() && !to.is_empty() {
+                format!("{base} — Computing: {from} → {to}")
+            } else {
+                format!("{base} — Computing…")
+            }
+        } else if !from.is_empty() && !to.is_empty() {
+            format!("{base} — {from} → {to}")
+        } else {
+            format!("{base} — Ready")
+        };
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+    }
+
+    fn db_status_indicator(&self, ui: &mut egui::Ui) {
+        // Base colors
+        let base = if self.db_connected {
+            egui::Color32::from_rgb(0, 170, 0)
+        } else {
+            egui::Color32::from_rgb(200, 40, 40)
+        };
+
+        let tooltip: String = if self.db_connected {
+            "SQLite: connected".to_string()
+        } else if let Some(err) = self.error.as_deref() {
+            format!("SQLite: error\n{}", err)
+        } else {
+            "SQLite: error".to_string()
+        };
+
+        // Geometry
+        let r = 6.0;
+        let size = egui::vec2(r * 2.0 + 2.0, r * 2.0 + 2.0);
+        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let center = rect.center();
+
+        let painter = ui.painter();
+
+        // 1) Soft shadow (down-right)
+        let shadow = egui::Color32::from_black_alpha(80);
+        painter.circle_filled(center + egui::vec2(1.2, 1.2), r + 0.3, shadow);
+
+        // 2) Main fill
+        painter.circle_filled(center, r, base);
+
+        // 3) Specular highlight (top-left) -> "3D" look
+        let highlight = egui::Color32::from_white_alpha(110);
+        painter.circle_filled(
+            center + egui::vec2(-r * 0.35, -r * 0.35),
+            r * 0.45,
+            highlight,
+        );
+
+        // 4) Thin black border
+        painter.circle_stroke(center, r, egui::Stroke::new(1.0, egui::Color32::BLACK));
+
+        // Tooltip
+        resp.on_hover_text(tooltip);
+    }
+
+    fn set_status(&mut self, msg: impl Into<String>) {
+        self.status = msg.into();
+        self.status_deadline = None;
+    }
+
+    fn set_status_ttl(&mut self, msg: impl Into<String>, ttl: Duration) {
+        self.status = msg.into();
+        self.status_deadline = Some(Instant::now() + ttl);
+    }
+
+    fn tick_status_deadline(&mut self) {
+        if let Some(deadline) = self.status_deadline
+            && Instant::now() >= deadline
+        {
+            self.status = self.ready_status.to_string();
+            self.status_deadline = None;
+        }
+    }
+
+    fn normalize_input(s: &str) -> String {
+        // trim + collassa whitespace interno
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn normalized_from_to(&self) -> (String, String) {
+        (
+            Self::normalize_input(&self.from),
+            Self::normalize_input(&self.to),
+        )
+    }
 }
 
 impl eframe::App for NavicomputerApp {
@@ -222,6 +356,34 @@ impl eframe::App for NavicomputerApp {
 
         // Bootstrap updates (status changes every 300ms)
         self.tick_bootstrap(ctx);
+        self.tick_status_deadline();
+
+        // Dynamic window title (ready/computing + route context)
+        self.update_window_title(ctx);
+
+        // ----------------------------
+        // Keyboard shortcuts (global)
+        // ----------------------------
+        let (enter, esc, ctrl_s) = ctx.input(|i| {
+            let enter = i.key_pressed(egui::Key::Enter);
+            let esc = i.key_pressed(egui::Key::Escape);
+            let ctrl_s = i.modifiers.ctrl && i.key_pressed(egui::Key::S);
+            (enter, esc, ctrl_s)
+        });
+
+        if enter && self.can_compute() {
+            self.compute_route_stub();
+        }
+        if esc && self.can_clear() {
+            self.clear_fields();
+            // Optional: restore a ready status after clear (unless boot is still running)
+            if self.boot_next.is_none() {
+                self.status = "Navicomputer ready. All systems are online.".to_string();
+            }
+        }
+        if ctrl_s && self.can_export() {
+            self.export_json();
+        }
 
         // ----------------------------
         // TOP PANEL (inputs + compute/clear)
@@ -249,18 +411,21 @@ impl eframe::App for NavicomputerApp {
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
+                    let compute = ui
                         .add_enabled(self.can_compute(), egui::Button::new("Compute"))
-                        .clicked()
-                    {
+                        .on_hover_text("Compute route (Enter)");
+                    if compute.clicked() {
                         self.compute_route_stub();
                     }
 
-                    if ui
+                    let clear = ui
                         .add_enabled(self.can_clear(), egui::Button::new("Clear"))
-                        .clicked()
-                    {
+                        .on_hover_text("Clear fields (Esc)");
+                    if clear.clicked() {
                         self.clear_fields();
+                        if self.boot_next.is_none() {
+                            self.status = "Navicomputer ready. All systems are online.".to_string();
+                        }
                     }
                 });
             });
@@ -275,23 +440,17 @@ impl eframe::App for NavicomputerApp {
         // Focus selection outside closures
         self.apply_focus_select_all(ctx, from_id, to_id);
 
-        // Shared frame with no gaps/borders.
-        // IMPORTANT: we always set an explicit fill per panel to avoid "black seams".
+        // Shared frame with no gaps/borders (explicit fill per panel below)
         let base_frame = egui::Frame::NONE
             .inner_margin(egui::Margin::same(0))
             .outer_margin(egui::Margin::same(0))
             .corner_radius(egui::CornerRadius::ZERO)
             .stroke(egui::Stroke::NONE);
 
-        // We want:
-        //   - bottom_bar (Export) above
-        //   - status_bar as the LAST panel at the very bottom (as you prefer)
-        //
-        // With multiple TopBottomPanel::bottom, the rule is: the LAST called becomes the lowest one.
-        // So: call bottom_bar first, then status_bar.
-
         // ----------------------------
         // BOTTOM BAR (Export) - ABOVE status bar
+        //   Left: version
+        //   Right: Export JSON
         // ----------------------------
         const BOTTOM_BAR_HEIGHT: f32 = 44.0;
         let bottom_fill = ctx.style().visuals.panel_fill;
@@ -303,29 +462,49 @@ impl eframe::App for NavicomputerApp {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), BOTTOM_BAR_HEIGHT),
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        ui.add_space(8.0);
-                        if ui
-                            .add_enabled(self.can_export(), egui::Button::new("Export JSON"))
-                            .clicked()
-                        {
-                            self.export_json();
-                        }
-                        ui.add_space(8.0);
-                    },
-                );
+                egui::Frame::NONE
+                    .fill(egui::Color32::TRANSPARENT)
+                    .inner_margin(egui::Margin::symmetric(8, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // DB status dot
+                            self.db_status_indicator(ui);
+
+                            ui.add_space(6.0);
+
+                            // LEFT: version badge
+                            ui.label(
+                                egui::RichText::new(format!("v{}", Self::app_version()))
+                                    .monospace()
+                                    .color(ui.visuals().weak_text_color()),
+                            )
+                            .on_hover_text(
+                                "sw_galaxy_map — Star Wars galaxy navicomputer (GUI + CLI)",
+                            );
+
+                            // spacer to push the button to the right
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let export = ui
+                                        .add_enabled(
+                                            self.can_export(),
+                                            egui::Button::new("Export JSON"),
+                                        )
+                                        .on_hover_text("Export JSON (Ctrl+S)");
+                                    if export.clicked() {
+                                        self.export_json();
+                                    }
+                                },
+                            );
+                        });
+                    });
             });
 
         // ----------------------------
-        // STATUS BAR - LAST / VERY BOTTOM (gray, no borders)
+        // STATUS BAR - LAST / VERY BOTTOM (messages only)
         // ----------------------------
-        const STATUS_BAR_HEIGHT: f32 = 24.0;
-
-        // Use an explicit light-ish fill; do NOT rely on faint_bg_color, which can be dark on some themes.
-        // This keeps it consistently "light gray" in both dark/light themes.
+        const STATUS_BAR_HEIGHT: f32 = 26.0;
         let status_fill = egui::Color32::from_gray(210);
 
         egui::TopBottomPanel::bottom("status_panel")
@@ -345,7 +524,6 @@ impl eframe::App for NavicomputerApp {
                             self.status.clone()
                         };
 
-                        // Use normal text color for readability on light gray.
                         ui.label(
                             egui::RichText::new(msg)
                                 .monospace()
@@ -355,7 +533,7 @@ impl eframe::App for NavicomputerApp {
             });
 
         // ----------------------------
-        // CENTRAL PANEL (output area) - BUILT LAST so it uses remaining space
+        // CENTRAL PANEL (output area) - BUILT LAST
         // ----------------------------
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(6.0);
