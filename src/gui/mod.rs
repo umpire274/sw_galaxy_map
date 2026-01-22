@@ -4,8 +4,12 @@ mod app;
 use anyhow::Result;
 
 pub fn run() -> Result<()> {
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../res/sw_galaxy_map_256.png"))
+        .expect("Failed to load icon");
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(icon)
             .with_title("SW Galaxy Map — Navicomputer")
             .with_inner_size([900.0, 600.0]),
         ..Default::default()

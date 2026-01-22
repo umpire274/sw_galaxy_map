@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.1] – 2026-XX-XX
+
+### Added
+
+- Embedded application icons for Windows and Linux.
+- GUI status bar improvements: automatic message reset to a ready state after a short timeout.
+- Input validation in GUI: normalized FROM/TO, prevented FROM==TO and empty inputs.
+- UI tooltips for version, database indicator, and main actions.
+
+### Changed
+
+- Minor UX polish: clearer status messaging and more consistent user feedback.
+
+---
+
 ## [0.7.0] – 2026-01-22
 
 ### Added
