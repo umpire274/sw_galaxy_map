@@ -1,5 +1,6 @@
 pub mod cli;
 pub(crate) mod db;
+pub mod gui;
 pub(crate) mod model;
 pub(crate) mod normalize;
 pub(crate) mod provision;

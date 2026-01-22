@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
@@ -49,6 +49,9 @@ atty = "0.2.14"
 owo-colors = "4.2.3"
 sha2 = "0.10.9"
 hex = "0.4.3"
+eframe = "0.33.3"
+egui = "0.33.3"
+rfd = "0.17.2"
 
 [profile.release]
 lto = true

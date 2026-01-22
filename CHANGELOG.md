@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] – 2026-01-22
+
+### Added
+
+- Introduced a graphical Navicomputer UI (GUI), launched automatically when no CLI arguments are provided.
+- FROM / TO input fields with keyboard-friendly behavior.
+- Compute and Clear actions.
+- Scrollable, monospace output area for route results.
+- JSON export via file dialog with standard filename format.
+- Dedicated status bar with diegetic boot sequence and system messages.
+
+### Changed
+
+- Application startup logic now selects CLI or GUI mode depending on provided arguments.
+
+### Notes
+
+- CLI functionality remains fully backward-compatible and unchanged.
+
+---
+
 ## [0.6.2] – 2026-01-20
 
 ### ✨ New Features
