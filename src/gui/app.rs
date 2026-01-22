@@ -299,7 +299,7 @@ impl eframe::App for NavicomputerApp {
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(false)
             .exact_height(BOTTOM_BAR_HEIGHT)
-            .frame(base_frame.clone().fill(bottom_fill))
+            .frame(base_frame.fill(bottom_fill))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
@@ -322,7 +322,7 @@ impl eframe::App for NavicomputerApp {
         // ----------------------------
         // STATUS BAR - LAST / VERY BOTTOM (gray, no borders)
         // ----------------------------
-        const STATUS_BAR_HEIGHT: f32 = 26.0;
+        const STATUS_BAR_HEIGHT: f32 = 24.0;
 
         // Use an explicit light-ish fill; do NOT rely on faint_bg_color, which can be dark on some themes.
         // This keeps it consistently "light gray" in both dark/light themes.
