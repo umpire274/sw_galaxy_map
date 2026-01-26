@@ -51,3 +51,16 @@ pub fn normalize(v: Point) -> Point {
 pub fn perp(v: Point) -> Point {
     Point::new(-v.y, v.x)
 }
+
+pub fn polyline_length_parsec(points: &[(f64, f64)]) -> f64 {
+    points
+        .windows(2)
+        .map(|w| {
+            let (x1, y1) = w[0];
+            let (x2, y2) = w[1];
+            let dx = x2 - x1;
+            let dy = y2 - y1;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}

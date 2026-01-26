@@ -7,9 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-# Changelog
+## [0.7.5] – 2026-01-26
 
-## [v0.7.2] — 2026-01-XX
+### ✨ New features
+
+- Added hyperspace **ETA estimation** for routes based on:
+    - geometric route length (polyline, including detours)
+    - galactic region compression factors
+    - hyperdrive class scaling
+- `route show` now displays a **synthetic ETA** using default parameters.
+- `route explain` supports ETA customization via:
+    - `--class <f64>` (hyperdrive class)
+    - `--region-blend avg|conservative|<weight>`
+
+### 🧭 ETA model
+
+- Introduced a reusable ETA computation model with:
+    - region-based hyperspace compression
+    - weighted blending for multi-region routes
+    - soft detour penalties (count + severity)
+- Hyperdrive class semantics fixed:
+    - lower class values are faster (e.g. class 0.5 is twice as fast as class 1.0)
+
+### 🛠 Improvements
+
+- Refactored galactic region extraction into a shared helper.
+- Debug-only logging for raw region metadata (`debug_assertions` gated).
+- Clear separation between routing cost and navigational ETA estimation.
+
+### 🧪 Stability
+
+- ETA computation is fail-soft: missing data does not break route display.
+- No database schema changes.
+
+---
+
+## [0.7.2] - 2026-01-26
 
 ### ✨ New Features
 
@@ -93,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.7.1] – 2026-XX-XX
+## [0.7.1] – 2026-01-24
 
 ### Added
 

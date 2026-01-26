@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
-use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteListSort};
+use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteExplainArgs, RouteListSort};
 use crate::cli::color::Colors;
 use crate::cli::export::{
     ExplainClosest, ExplainDetour, ExplainDominantPenalty, ExplainEndpoint, ExplainExport,
@@ -16,10 +16,19 @@ use crate::model::RouteOptionsJson;
 use crate::normalize::normalize_text;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
+use crate::routing::geometry::dist as geom_dist;
+use crate::routing::hyperspace::{
+    DetourPenaltyParams, GalacticRegion, detour_penalty_multiplier, estimate_travel_time_hours,
+    extract_galactic_region,
+};
 use crate::routing::route_debug::debug_print_route;
 use crate::routing::router::{RouteOptions, compute_route};
 
 use crate::ui::Style;
+
+// ETA model defaults (not exposed to CLI yet)
+const DEFAULT_DETOUR_COUNT_BASE: f64 = 0.97;
+const DEFAULT_SEVERITY_K: f64 = 0.35;
 
 pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
     match cmd {
@@ -29,8 +38,8 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
         RouteCmd::Show { route_id } => {
             validate::validate_route_id(*route_id, "show")?;
         }
-        RouteCmd::Explain { route_id, .. } => {
-            validate::validate_route_id(*route_id, "explain")?;
+        RouteCmd::Explain(args) => {
+            validate::validate_route_id(args.route_id, "explain")?;
         }
         RouteCmd::Last { from, to } => {
             validate::validate_route_compute(from, to)?;
@@ -44,11 +53,7 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
     match cmd {
         RouteCmd::Compute(args) => run_compute(con, args),
         RouteCmd::Show { route_id } => run_show(con, *route_id),
-        RouteCmd::Explain {
-            route_id,
-            json,
-            file,
-        } => run_explain(con, *route_id, *json, file.as_deref()),
+        RouteCmd::Explain(args) => run_explain(con, args),
         RouteCmd::Clear { yes } => run_clear(con, *yes),
         RouteCmd::Prune => run_prune(con),
         RouteCmd::Last { from, to } => run_last(con, from, to),
@@ -180,6 +185,12 @@ fn run_compute(con: &mut Connection, args: &RouteComputeArgs) -> Result<()> {
 }
 
 fn run_show(con: &Connection, route_id: i64) -> Result<()> {
+    // ETA model defaults for `route show`
+    const SHOW_DEFAULT_HYPERDRIVE_CLASS: f64 = 1.0;
+    const SHOW_DEFAULT_DETOUR_COUNT_BASE: f64 = 0.97;
+    const SHOW_DEFAULT_SEVERITY_K: f64 = 0.35;
+    const SHOW_DEFAULT_REGION_BLEND: RegionBlend = RegionBlend::Avg;
+
     let loaded = queries::load_route(con, route_id)?
         .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
 
@@ -210,6 +221,17 @@ fn run_show(con: &Connection, route_id: i64) -> Result<()> {
     let route_len = loaded.route.length;
     if let Some(len) = route_len {
         println!("Length: {:.3} parsec", len);
+
+        if let Some(eta) = compute_eta_summary(
+            con,
+            &loaded,
+            SHOW_DEFAULT_HYPERDRIVE_CLASS,
+            SHOW_DEFAULT_REGION_BLEND,
+            SHOW_DEFAULT_DETOUR_COUNT_BASE,
+            SHOW_DEFAULT_SEVERITY_K,
+        ) {
+            println!("{}", eta);
+        }
     }
     if let Some(it) = loaded.route.iterations {
         println!("Iterations: {}", it);
@@ -386,15 +408,141 @@ fn analyze_detour_drivers(
     out
 }
 
-fn run_explain(con: &Connection, route_id: i64, json: bool, file: Option<&Path>) -> Result<()> {
-    let loaded = queries::load_route(con, route_id)?
-        .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
+#[derive(Debug, Clone, Copy)]
+enum RegionBlend {
+    Avg,
+    Conservative,
+    Weighted(f64), // from_weight
+}
+
+fn parse_region_blend(s: &str) -> RegionBlend {
+    match s {
+        "avg" => RegionBlend::Avg,
+        "conservative" => RegionBlend::Conservative,
+        _ => {
+            // prova a interpretarlo come peso numerico
+            if let Ok(w) = s.parse::<f64>() {
+                RegionBlend::Weighted(w.clamp(0.0, 1.0))
+            } else {
+                // fallback sicuro
+                RegionBlend::Avg
+            }
+        }
+    }
+}
+
+fn compute_eta_summary(
+    con: &Connection,
+    loaded: &queries::RouteLoaded,
+    hyperdrive_class: f64,
+    blend: RegionBlend,
+    detour_count_base: f64, // e.g. 0.97
+    severity_k: f64,        // e.g. 0.35
+) -> Option<String> {
+    if loaded.waypoints.len() < 2 {
+        return None;
+    }
+    if hyperdrive_class <= 0.0 || detour_count_base <= 0.0 || severity_k < 0.0 {
+        return None;
+    }
+
+    // Geometric route length (polyline)
+    let route_len: f64 = loaded
+        .waypoints
+        .windows(2)
+        .map(|w| {
+            let p1 = Point::new(w[0].x, w[0].y);
+            let p2 = Point::new(w[1].x, w[1].y);
+            geom_dist(p1, p2)
+        })
+        .sum();
+
+    let a = loaded.waypoints.first().unwrap();
+    let b = loaded.waypoints.last().unwrap();
+    let direct = geom_dist(Point::new(a.x, a.y), Point::new(b.x, b.y));
+
+    if direct <= 0.0 || route_len <= 0.0 {
+        return None;
+    }
+
+    // Detour multipliers
+    let detour_params = DetourPenaltyParams::default();
+    let detour_mult_geom = detour_penalty_multiplier(direct, route_len, detour_params);
+
+    let detour_count = loaded.detours.len() as i32;
+    let detour_mult_count = detour_count_base.powi(detour_count);
+
+    let mut severity_sum: f64 = loaded
+        .detours
+        .iter()
+        .map(|d| {
+            let req = d.offset_used.max(1e-9);
+            ((req - d.closest_dist) / req).clamp(0.0, 1.0)
+        })
+        .sum();
+
+    if severity_sum.abs() < 1e-12 {
+        severity_sum = 0.0;
+    }
+
+    let detour_mult_severity = 1.0 / (1.0 + severity_k * severity_sum);
+
+    let detour_mult = (detour_mult_geom * detour_mult_count * detour_mult_severity)
+        .clamp(detour_params.floor, 1.0);
+
+    // Load endpoint planets (fail-soft)
+    let from_p = queries::get_planet_by_fid(con, loaded.route.from_planet_fid).ok()??;
+    let to_p = queries::get_planet_by_fid(con, loaded.route.to_planet_fid).ok()??;
+
+    let from_region = extract_galactic_region(&from_p);
+    let to_region = extract_galactic_region(&to_p);
+
+    // Conservative fallback if missing
+    let rf = from_region.unwrap_or(GalacticRegion::OuterRim);
+    let rt = to_region.unwrap_or(GalacticRegion::OuterRim);
+
+    // Base CF from blend
+    let cf_from = rf.base_compression_factor();
+    let cf_to = rt.base_compression_factor();
+
+    let cf_base_eff = match blend {
+        RegionBlend::Avg => (cf_from + cf_to) / 2.0,
+        RegionBlend::Conservative => cf_from * 0.4 + cf_to * 0.6,
+        RegionBlend::Weighted(w) => {
+            let w = w.clamp(0.0, 1.0);
+            cf_from * w + cf_to * (1.0 - w)
+        }
+    };
+
+    // Apply detour multiplier
+    let compression = (cf_base_eff * detour_mult).max(5.0);
+
+    // IMPORTANT: hyperdrive class scales time linearly (0.5 is faster than 1.0)
+    let eta_hours = estimate_travel_time_hours(route_len, compression, hyperdrive_class);
+
+    Some(format!(
+        "ETA: {:.1} h (~{:.1} d) [class={:.1}, from={:?}, to={:?}, blend={:?}, cf={:.2}, detours={}, mult={:.3}]",
+        eta_hours,
+        eta_hours / 24.0,
+        hyperdrive_class,
+        rf,
+        rt,
+        blend,
+        compression,
+        loaded.detours.len(),
+        detour_mult,
+    ))
+}
+
+fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
+    let loaded = queries::load_route(con, args.route_id)?
+        .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", args.route_id))?;
 
     // Parse options_json (best-effort: explain still works even if parsing fails)
     let opts: Option<RouteOptionsJson> = serde_json::from_str(&loaded.route.options_json).ok();
     let clearance = opts.as_ref().map(|o| o.clearance).unwrap_or(0.0);
 
-    if json {
+    if args.json {
         // Build export payload
         let mut detours_out = Vec::with_capacity(loaded.detours.len());
 
@@ -492,7 +640,7 @@ fn run_explain(con: &Connection, route_id: i64, json: bool, file: Option<&Path>)
         // JSON only, no colors, stdout
         let s = serde_json::to_string_pretty(&export)?;
 
-        if let Some(path) = file {
+        if let Some(path) = &args.file {
             if let Some(parent) = path.parent()
                 && !parent.as_os_str().is_empty()
             {
@@ -537,7 +685,19 @@ fn run_explain(con: &Connection, route_id: i64, json: bool, file: Option<&Path>)
 
     if let Some(len) = loaded.route.length {
         println!("Length: {:.3} parsec", len);
+
+        if let Some(eta) = compute_eta_summary(
+            con,
+            &loaded,
+            args.hyperdrive_class,
+            parse_region_blend(&args.region_blend),
+            DEFAULT_DETOUR_COUNT_BASE,
+            DEFAULT_SEVERITY_K,
+        ) {
+            println!("{}", eta);
+        }
     }
+
     if let Some(it) = loaded.route.iterations {
         println!("Iterations: {}", it);
     }
