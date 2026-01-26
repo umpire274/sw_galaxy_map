@@ -375,10 +375,7 @@ pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
 
     if current >= LATEST_SCHEMA_VERSION {
         if emit_noop {
-            ui::info(format!(
-                "Database schema already up-to-date (v{})",
-                current
-            ));
+            ui::info(format!("Database schema already up-to-date (v{})", current));
         }
         return Ok(());
     }
@@ -388,10 +385,16 @@ pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
         current, LATEST_SCHEMA_VERSION
     ));
 
-    let tx = con.transaction().context("Failed to start migration transaction")?;
+    let tx = con
+        .transaction()
+        .context("Failed to start migration transaction")?;
 
     let steps = migration_steps();
-    let latest = steps.iter().map(|s| s.to).max().unwrap_or(START_SCHEMA_VERSION);
+    let latest = steps
+        .iter()
+        .map(|s| s.to)
+        .max()
+        .unwrap_or(START_SCHEMA_VERSION);
     let mut cur = current.max(START_SCHEMA_VERSION);
 
     let mut applied = 0usize;
@@ -404,7 +407,8 @@ pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
                 "No migration step found for v{} → v{}. Available steps: {}",
                 cur,
                 next,
-                steps.iter()
+                steps
+                    .iter()
                     .map(|s| format!("v{}→v{}", s.from, s.to))
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -423,23 +427,24 @@ pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
             set_schema_version(&tx, step.to)?;
         }
 
-        ui::success(format!(
-            "Migration v{} → v{} completed",
-            step.from, step.to
-        ));
+        ui::success(format!("Migration v{} → v{} completed", step.from, step.to));
 
         applied += 1;
         cur = step.to;
     }
 
     if dry_run {
-        ui::info(format!("Dry-run completed: {applied} migration(s) would be applied."));
+        ui::info(format!(
+            "Dry-run completed: {applied} migration(s) would be applied."
+        ));
         // niente commit
         return Ok(());
     }
 
     tx.commit().context("Failed to commit migration")?;
-    ui::info(format!("Database schema successfully updated (applied {applied} migration(s))."));
+    ui::info(format!(
+        "Database schema successfully updated (applied {applied} migration(s))."
+    ));
 
     Ok(())
 }

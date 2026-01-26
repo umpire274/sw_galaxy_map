@@ -129,7 +129,7 @@ pub enum DbCommands {
         /// Show what migrations would be applied without executing them
         #[arg(long, action = clap::ArgAction::SetTrue)]
         dry_run: bool,
-    }
+    },
 }
 
 #[derive(Subcommand, Debug)]
