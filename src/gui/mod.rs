@@ -11,7 +11,7 @@ pub fn run() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_icon(icon)
             .with_title("SW Galaxy Map — Navicomputer")
-            .with_inner_size([900.0, 600.0]),
+            .with_inner_size([1040.0, 600.0]),
         ..Default::default()
     };
 

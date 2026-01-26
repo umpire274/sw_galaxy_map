@@ -2,7 +2,69 @@ use crate::ui;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
-const SCHEMA_VERSION: i64 = 9;
+const START_SCHEMA_VERSION: i64 = 3;
+const LATEST_SCHEMA_VERSION: i64 = 10;
+
+struct MigrationStep {
+    from: i64,
+    to: i64,
+    label: &'static str,
+    apply: fn(&Transaction<'_>) -> Result<()>,
+}
+
+fn migration_steps() -> &'static [MigrationStep] {
+    &[
+        MigrationStep {
+            from: 3,
+            to: 4,
+            label: "planets metadata",
+            apply: m_to_v4,
+        },
+        MigrationStep {
+            from: 4,
+            to: 5,
+            label: "waypoints catalog",
+            apply: m_to_v5,
+        },
+        MigrationStep {
+            from: 5,
+            to: 6,
+            label: "waypoint↔planet links + fingerprint",
+            apply: m_to_v6,
+        },
+        MigrationStep {
+            from: 6,
+            to: 7,
+            label: "routes persistence",
+            apply: m_to_v7,
+        },
+        MigrationStep {
+            from: 7,
+            to: 8,
+            label: "route upsert + updated_at",
+            apply: m_to_v8,
+        },
+        MigrationStep {
+            from: 8,
+            to: 9,
+            label: "route_detours tries_used + tries_exhausted",
+            apply: m_to_v9,
+        },
+        MigrationStep {
+            from: 9,
+            to: 10,
+            label: "routes status index",
+            apply: m_to_v10,
+        },
+    ]
+}
+
+fn set_schema_version(tx: &Transaction<'_>, v: i64) -> Result<()> {
+    let v_str = v.to_string();
+    meta_upsert(tx, "schema_version", &v_str)
+        .with_context(|| format!("Failed to update meta.schema_version to {}", v_str))?;
+    Ok(())
+}
 
 fn column_exists(tx: &Transaction<'_>, table: &str, col: &str) -> Result<bool> {
     let sql = format!("PRAGMA table_info({})", table);
@@ -292,81 +354,97 @@ fn m_to_v9(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+fn m_to_v10(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
+        "#,
+    )
+    .context("Failed to migrate schema to v10 (creation idx_routes_status index)")?;
+
+    Ok(())
+}
+
 /// Run schema migrations up to SCHEMA_VERSION.
 /// Idempotent and safe to call on every startup/open.
-pub fn run(con: &mut Connection) -> Result<()> {
+pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
     con.query_row("SELECT 1 FROM meta LIMIT 1", [], |r| r.get::<_, i32>(0))
         .context("Database schema is missing required table: meta")?;
 
     let current = meta_get_i64(con, "schema_version")?.unwrap_or(0);
 
-    if current >= SCHEMA_VERSION {
+    if current >= LATEST_SCHEMA_VERSION {
+        if emit_noop {
+            ui::info(format!("Database schema already up-to-date (v{})", current));
+        }
         return Ok(());
     }
 
     ui::info(format!(
         "Database schema upgrade required (current: v{}, target: v{})",
-        current, SCHEMA_VERSION
+        current, LATEST_SCHEMA_VERSION
     ));
 
     let tx = con
         .transaction()
         .context("Failed to start migration transaction")?;
 
-    // Incremental migrations
-    if current < 4 {
-        ui::info("Applying migration: v3 → v4 (planets metadata)");
-        m_to_v4(&tx)?;
-        let new_schema_version = "4";
-        meta_upsert(&tx, "schema_version", new_schema_version).context(format!(
-            "Failed to update meta.schema_version to {}",
-            new_schema_version
-        ))?;
-        ui::success("Migration v3 → v4 completed");
+    let steps = migration_steps();
+    let latest = steps
+        .iter()
+        .map(|s| s.to)
+        .max()
+        .unwrap_or(START_SCHEMA_VERSION);
+    let mut cur = current.max(START_SCHEMA_VERSION);
+
+    let mut applied = 0usize;
+
+    while cur < latest {
+        let next = cur + 1;
+
+        let Some(step) = steps.iter().find(|s| s.from == cur && s.to == next) else {
+            anyhow::bail!(
+                "No migration step found for v{} → v{}. Available steps: {}",
+                cur,
+                next,
+                steps
+                    .iter()
+                    .map(|s| format!("v{}→v{}", s.from, s.to))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        };
+
+        ui::info(format!(
+            "Applying migration: v{} → v{} ({})",
+            step.from, step.to, step.label
+        ));
+
+        if dry_run {
+            ui::warning("DRY-RUN: no changes will be applied");
+        } else {
+            (step.apply)(&tx)?;
+            set_schema_version(&tx, step.to)?;
+        }
+
+        ui::success(format!("Migration v{} → v{} completed", step.from, step.to));
+
+        applied += 1;
+        cur = step.to;
     }
 
-    if current < 5 {
-        ui::info("Applying migration: v4 → v5 (waypoints catalog)");
-        m_to_v5(&tx)?;
-        let new_schema_version = "5";
-        meta_upsert(&tx, "schema_version", new_schema_version).context(format!(
-            "Failed to update meta.schema_version to {}",
-            new_schema_version
-        ))?;
-        ui::success("Migration v4 → v5 completed");
-    }
-
-    if current < 6 {
-        ui::info("Applying migration: v5 → v6 (waypoint↔planet links + fingerprint)");
-        m_to_v6(&tx)?;
-        meta_upsert(&tx, "schema_version", "6")?;
-        ui::success("Migration v5 → v6 completed");
-    }
-
-    if current < 7 {
-        ui::info("Applying migration: v6 → v7 (routes persistence)");
-        m_to_v7(&tx)?;
-        meta_upsert(&tx, "schema_version", "7")?;
-        ui::success("Migration v6 → v7 completed");
-    }
-
-    if current < 8 {
-        ui::info("Applying migration: v7 → v8 (route upsert + updated_at)");
-        m_to_v8(&tx)?;
-        meta_upsert(&tx, "schema_version", "8")?;
-        ui::success("Migration v7 → v8 completed");
-    }
-
-    if current < 9 {
-        ui::info("Applying migration: v8 → v9 (route_detours tries_used + tries_exhausted)");
-        m_to_v9(&tx)?;
-        meta_upsert(&tx, "schema_version", "9")?;
-        ui::success("Migration v8 → v9 completed");
+    if dry_run {
+        ui::info(format!(
+            "Dry-run completed: {applied} migration(s) would be applied."
+        ));
+        // niente commit
+        return Ok(());
     }
 
     tx.commit().context("Failed to commit migration")?;
-
-    ui::info("Database schema successfully updated");
+    ui::info(format!(
+        "Database schema successfully updated (applied {applied} migration(s))."
+    ));
 
     Ok(())
 }

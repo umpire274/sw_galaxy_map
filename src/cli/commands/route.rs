@@ -23,6 +23,25 @@ use crate::ui::Style;
 
 pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
     match cmd {
+        RouteCmd::Compute(args) => {
+            validate::validate_route_compute(&args.from, &args.to)?;
+        }
+        RouteCmd::Show { route_id } => {
+            validate::validate_route_id(*route_id, "show")?;
+        }
+        RouteCmd::Explain { route_id, .. } => {
+            validate::validate_route_id(*route_id, "explain")?;
+        }
+        RouteCmd::Last { from, to } => {
+            validate::validate_route_compute(from, to)?;
+        }
+        RouteCmd::List { limit, .. } => {
+            validate::validate_limit(*limit as i64, "list")?;
+        }
+        _ => {}
+    }
+
+    match cmd {
         RouteCmd::Compute(args) => run_compute(con, args),
         RouteCmd::Show { route_id } => run_show(con, *route_id),
         RouteCmd::Explain {
@@ -40,6 +59,7 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
             status,
             from,
             to,
+            wp,
             sort,
         } => {
             let opts = RouteListOptions {
@@ -49,6 +69,7 @@ pub fn run(con: &mut Connection, cmd: &RouteCmd) -> Result<()> {
                 status: status.as_deref(),
                 from: *from,
                 to: *to,
+                wp: *wp,
                 sort: *sort,
             };
 
@@ -795,6 +816,7 @@ fn run_prune(con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+use crate::cli::validate;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -830,6 +852,7 @@ struct RouteListOptions<'a> {
     pub status: Option<&'a str>,
     pub from: Option<i64>,
     pub to: Option<i64>,
+    pub wp: Option<usize>,
     pub sort: RouteListSort,
 }
 
@@ -838,7 +861,15 @@ fn run_list(con: &Connection, opts: RouteListOptions<'_>) -> Result<()> {
     let style = Style::default();
     let c = Colors::new(&style);
 
-    let rows = queries::list_routes(con, opts.limit, opts.status, opts.from, opts.to, opts.sort)?;
+    let rows = queries::list_routes(
+        con,
+        opts.limit,
+        opts.status,
+        opts.from,
+        opts.to,
+        opts.wp,
+        opts.sort,
+    )?;
 
     if opts.json {
         let export = RouteListExport {

@@ -38,7 +38,12 @@ pub enum Commands {
         planet: String,
     },
 
-    /// Find nearby planets within a radius (parsecs) using Euclidean distance on X/Y
+    /// Find nearby planets within a radius (parsecs) using Euclidean distance on X/Y.
+    ///
+    /// Notes:
+    /// - If you provide `--planet`, the planet coordinates are used as the center.
+    /// - Otherwise you must provide both `--x` and `--y`.
+    /// - For negative coordinates, use the `=` form (e.g. `--y=-190`) to avoid CLI parsing ambiguity.
     Near {
         /// Radius (parsecs)
         #[arg(long)]
@@ -48,12 +53,16 @@ pub enum Commands {
         #[arg(long)]
         planet: Option<String>,
 
-        /// X coordinate (parsecs), if --planet is not used
-        #[arg(long)]
+        /// X coordinate (parsecs), if --planet is not used.
+        ///
+        /// Tip: for negative values use `--x=-190` (with '=').
+        #[arg(long, verbatim_doc_comment)]
         x: Option<f64>,
 
-        /// Y coordinate (parsecs), if --planet is not used
-        #[arg(long)]
+        /// Y coordinate (parsecs), if --planet is not used.
+        ///
+        /// Tip: for negative values use `--y=-190` (with '=').
+        #[arg(long, verbatim_doc_comment)]
         y: Option<f64>,
 
         /// Max rows (default: 20)
@@ -116,7 +125,11 @@ pub enum DbCommands {
     },
 
     /// Migrate the local database to the latest schema version
-    Migrate,
+    Migrate {
+        /// Show what migrations would be applied without executing them
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -290,6 +303,10 @@ pub enum RouteCmd {
         /// Filter by TO planet fid
         #[arg(long)]
         to: Option<i64>,
+
+        /// Filter by exact number of waypoints
+        #[arg(long)]
+        wp: Option<usize>,
 
         /// Sort field (updated|id|length). Default: updated
         #[arg(long, value_enum, default_value_t = RouteListSort::Updated)]

@@ -219,3 +219,13 @@ pub struct RouteListRow {
     pub waypoints_count: i64,
     pub detours_count: i64,
 }
+
+#[derive(Debug, Clone)]
+pub struct PlanetSearchRow {
+    pub fid: i64,
+    pub name: String,
+    pub region: Option<String>,
+    pub sector: Option<String>,
+    pub system: Option<String>,
+    pub grid: Option<String>,
+}

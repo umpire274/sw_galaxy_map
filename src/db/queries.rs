@@ -1,11 +1,12 @@
 use crate::db::has_table;
 use crate::model::{
-    AliasRow, NearHit, Planet, RouteListRow, RoutingObstacleRow, Waypoint, WaypointPlanetLink,
+    AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, Waypoint,
+    WaypointPlanetLink,
 };
 use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Row, ToSql, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
@@ -119,7 +120,7 @@ pub fn search_planets(
     con: &Connection,
     query_norm: &str,
     limit: i64,
-) -> Result<Vec<(i64, String)>> {
+) -> Result<Vec<PlanetSearchRow>> {
     if has_table(con, "planets_fts")? {
         return search_planets_fts(con, query_norm, limit);
     }
@@ -131,13 +132,13 @@ fn search_planets_like(
     con: &Connection,
     query_norm: &str,
     limit: i64,
-) -> Result<Vec<(i64, String)>> {
+) -> Result<Vec<PlanetSearchRow>> {
     let like = format!("%{}%", query_norm);
 
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid
             FROM planet_search s
             JOIN planets p ON p.FID = s.planet_fid
             WHERE p.deleted = 0 AND s.search_norm LIKE ?1
@@ -149,7 +150,14 @@ fn search_planets_like(
 
     let rows = stmt
         .query_map((like, limit), |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            Ok(PlanetSearchRow {
+                fid: r.get::<_, i64>(0)?,
+                name: r.get::<_, String>(1)?,
+                region: r.get::<_, Option<String>>(2)?,
+                sector: r.get::<_, Option<String>>(3)?,
+                system: r.get::<_, Option<String>>(4)?,
+                grid: r.get::<_, Option<String>>(5)?,
+            })
         })
         .context("Failed to execute LIKE search query")?;
 
@@ -164,13 +172,11 @@ fn search_planets_fts(
     con: &Connection,
     query_norm: &str,
     limit: i64,
-) -> Result<Vec<(i64, String)>> {
-    // For FTS5, search terms are tokenized; normalized text works well.
-    // bm25() provides a reasonable relevance score (lower is better).
+) -> Result<Vec<PlanetSearchRow>> {
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
             WHERE p.deleted = 0 AND planets_fts MATCH ?1
@@ -182,7 +188,14 @@ fn search_planets_fts(
 
     let rows = stmt
         .query_map((query_norm, limit), |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            Ok(PlanetSearchRow {
+                fid: r.get::<_, i64>(0)?,
+                name: r.get::<_, String>(1)?,
+                region: r.get::<_, Option<String>>(2)?,
+                sector: r.get::<_, Option<String>>(3)?,
+                system: r.get::<_, Option<String>>(4)?,
+                grid: r.get::<_, Option<String>>(5)?,
+            })
         })
         .context("Failed to execute FTS search query")?;
 
@@ -1113,13 +1126,16 @@ pub fn list_routes(
     status: Option<&str>,
     from: Option<i64>,
     to: Option<i64>,
+    wp: Option<usize>,
     sort: crate::cli::args::RouteListSort,
 ) -> Result<Vec<RouteListRow>> {
+    use rusqlite::ToSql;
+
     let mut where_parts: Vec<&'static str> = Vec::new();
     let mut params: Vec<Box<dyn ToSql>> = Vec::new();
 
     if let Some(s) = status {
-        where_parts.push("lower(r.status) = lower(?)"); // exact match
+        where_parts.push("r.status = ? COLLATE NOCASE");
         params.push(Box::new(s.to_string()));
     }
     if let Some(fid) = from {
@@ -1131,58 +1147,108 @@ pub fn list_routes(
         params.push(Box::new(fid));
     }
 
-    let where_sql = if where_parts.is_empty() {
-        "".to_string()
-    } else {
-        format!("WHERE {}", where_parts.join(" AND "))
-    };
-
-    // ORDER BY MUST be whitelisted (never bound as a parameter)
     let order_sql = match sort {
         crate::cli::args::RouteListSort::Updated => {
             "ORDER BY COALESCE(r.updated_at, r.created_at) DESC, r.id DESC"
         }
         crate::cli::args::RouteListSort::Id => "ORDER BY r.id DESC",
         crate::cli::args::RouteListSort::Length => {
-            // Put NULL lengths last
             "ORDER BY (r.length IS NULL) ASC, r.length ASC, r.id DESC"
         }
     };
 
-    let sql = format!(
-        r#"
-        SELECT
-          r.id AS id,
-          r.from_planet_fid AS from_planet_fid,
-          fp.planet_norm AS from_planet_name,
-          r.to_planet_fid AS to_planet_fid,
-          tp.planet_norm AS to_planet_name,
+    let sql = if let Some(n) = wp {
+        // With --wp we filter by exact waypoint count => use CTE counts (fast/clean).
+        where_parts.push("COALESCE(wp.cnt, 0) = ?");
+        params.push(Box::new(n as i64));
 
-          r.status AS status,
-          r.length AS length,
-          r.iterations AS iterations,
+        let where_sql = if where_parts.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_parts.join(" AND "))
+        };
 
-          r.created_at AS created_at,
-          r.updated_at AS updated_at,
+        format!(
+            r#"
+            WITH
+              wp AS (
+                SELECT route_id, COUNT(*) AS cnt
+                FROM route_waypoints
+                GROUP BY route_id
+              ),
+              dt AS (
+                SELECT route_id, COUNT(*) AS cnt
+                FROM route_detours
+                GROUP BY route_id
+              )
+            SELECT
+              r.id AS id,
+              r.from_planet_fid AS from_planet_fid,
+              fp.Planet AS from_planet_name,
+              r.to_planet_fid AS to_planet_fid,
+              tp.Planet AS to_planet_name,
 
-          (SELECT COUNT(*) FROM route_waypoints w WHERE w.route_id = r.id) AS waypoints_count,
-          (SELECT COUNT(*) FROM route_detours d WHERE d.route_id = r.id) AS detours_count
+              r.status AS status,
+              r.length AS length,
+              r.iterations AS iterations,
 
-        FROM routes r
-        JOIN planets fp ON fp.FID = r.from_planet_fid
-        JOIN planets tp ON tp.FID = r.to_planet_fid
-        {where_sql}
-        {order_sql}
-        LIMIT ?
-        "#
-    );
+              r.created_at AS created_at,
+              r.updated_at AS updated_at,
 
-    // limit is always last parameter
+              COALESCE(wp.cnt, 0) AS waypoints_count,
+              COALESCE(dt.cnt, 0) AS detours_count
+
+            FROM routes r
+            JOIN planets fp ON fp.FID = r.from_planet_fid
+            JOIN planets tp ON tp.FID = r.to_planet_fid
+            LEFT JOIN wp ON wp.route_id = r.id
+            LEFT JOIN dt ON dt.route_id = r.id
+            {where_sql}
+            {order_sql}
+            LIMIT ?
+            "#
+        )
+    } else {
+        // No --wp: keep it lightweight (correlated subqueries are fine with LIMIT 50).
+        let where_sql = if where_parts.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_parts.join(" AND "))
+        };
+
+        format!(
+            r#"
+            SELECT
+              r.id AS id,
+              r.from_planet_fid AS from_planet_fid,
+              fp.Planet AS from_planet_name,
+              r.to_planet_fid AS to_planet_fid,
+              tp.Planet AS to_planet_name,
+
+              r.status AS status,
+              r.length AS length,
+              r.iterations AS iterations,
+
+              r.created_at AS created_at,
+              r.updated_at AS updated_at,
+
+              (SELECT COUNT(*) FROM route_waypoints w WHERE w.route_id = r.id) AS waypoints_count,
+              (SELECT COUNT(*) FROM route_detours d WHERE d.route_id = r.id) AS detours_count
+
+            FROM routes r
+            JOIN planets fp ON fp.FID = r.from_planet_fid
+            JOIN planets tp ON tp.FID = r.to_planet_fid
+            {where_sql}
+            {order_sql}
+            LIMIT ?
+            "#
+        )
+    };
+
+    // limit always last
     params.push(Box::new(limit as i64));
 
     let mut stmt = con.prepare(&sql)?;
-
-    // Convert Vec<Box<dyn ToSql>> to slice of &dyn ToSql
     let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref() as &dyn ToSql).collect();
 
     let rows = stmt
