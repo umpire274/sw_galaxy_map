@@ -3,7 +3,7 @@ use crate::model::{
     AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, Waypoint,
     WaypointPlanetLink,
 };
-use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
+pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -64,6 +64,23 @@ pub fn find_planet_by_norm(con: &Connection, planet_norm: &str) -> Result<Option
     let mut stmt = con.prepare(&sql)?;
     let planet = stmt.query_row([planet_norm], Planet::from_row).optional()?;
 
+    Ok(planet)
+}
+
+pub fn get_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<Planet>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM planets p
+        WHERE p.FID = ?1
+        LIMIT 1
+        "#,
+        select = PLANET_SELECT_CANON
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let planet = stmt.query_row([fid], Planet::from_row).optional()?;
     Ok(planet)
 }
 

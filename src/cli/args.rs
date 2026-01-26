@@ -249,18 +249,7 @@ pub enum RouteCmd {
     },
 
     /// Explain a persisted route detours (why/what/how) by id
-    Explain {
-        /// Route id
-        route_id: i64,
-
-        /// Export explanation as JSON (stdout)
-        #[arg(long, action = clap::ArgAction::SetTrue)]
-        json: bool,
-
-        /// Write JSON to file (absolute or relative path). Requires --json.
-        #[arg(long, requires = "json")]
-        file: Option<std::path::PathBuf>,
-    },
+    Explain(RouteExplainArgs),
 
     /// Show the current persisted route for a FROM→TO pair (unique in schema v8)
     Last {
@@ -372,4 +361,26 @@ pub struct RouteComputeArgs {
     /// Max obstacles to consider (debug safety cap)
     #[arg(long, default_value_t = 8000)]
     pub max_obstacles: usize,
+}
+
+#[derive(Args, Debug)]
+pub struct RouteExplainArgs {
+    /// Route id
+    pub route_id: i64,
+
+    /// Export explanation as JSON (stdout)
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub json: bool,
+
+    /// Write JSON to file (absolute or relative path). Requires --json.
+    #[arg(long, requires = "json")]
+    pub file: Option<std::path::PathBuf>,
+
+    /// Hyperdrive class (e.g. 0.5, 1.0, 2.0)
+    #[arg(long = "class", default_value_t = 1.0)]
+    pub hyperdrive_class: f64,
+
+    /// Region blend strategy: avg | conservative | <from_weight>
+    #[arg(long = "region-blend", default_value = "avg")]
+    pub region_blend: String,
 }
