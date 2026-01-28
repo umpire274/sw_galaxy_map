@@ -1,6 +1,6 @@
 use crate::db::queries::{find_planet_for_info, near_planets, near_planets_excluding_fid};
-use crate::normalize::normalize_text;
 use crate::ui::{info, warning};
+use crate::utils::normalize::normalize_text;
 use anyhow::Result;
 use rusqlite::Connection;
 

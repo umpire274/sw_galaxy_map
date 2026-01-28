@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## v0.8.0 — 2026-01-28
+
+### ⚠️ Breaking change
+
+- **Default startup behavior changed**: running `sw_galaxy_map` with **no arguments** now enters **Interactive CLI**
+  mode.  
+  Use `--gui` to start the GUI.
+
+### Added
+
+- **Interactive CLI mode** when no args are provided.
+- `--gui` flag to explicitly start the GUI.
+- `route explain`: new options
+    - `--class <f64>` to set Hyperdrive class for ETA computation
+    - `--region-blend <avg|conservative|w>` to control region compression blending.
+- **ETA summary** in `route show` (defaults: class `1.0`, blend `avg`).
+- `waypoint links <id>` now also shows **Associated routes** for the waypoint.
+- `waypoint prune` to remove orphan `computed` waypoints:
+    - `--dry-run` preview mode
+    - `--include-linked` to prune even if linked to planets (links are removed as part of prune).
+- New utility module `src/utils/formatting.rs`:
+    - `truncate_ellipsis()` for stable table rendering
+    - `print_kv_block_colored_keys()` for aligned `key: value` blocks (multiline-safe).
+
+### Changed
+
+- Improved table rendering for `route list`:
+    - consistent alignment
+    - `FROM/TO` truncation to prevent table breaks
+    - “found N routes …” summary with LIMIT awareness
+    - compact English messaging.
+- Improved `waypoint list`:
+    - shows total count + paging behavior
+    - shows `LINKS` count and an **orphan marker** for “linked but unused by any route”
+    - optional legend line printed only when needed.
+
+### Fixed
+
+- Region parsing/selection issues in `route explain` ETA output (endpoint regions are now handled consistently).
+- Various CLI plumbing issues introduced while restructuring clap + command dispatch (DB opening / command routing).
+
+---
+
 ## [0.7.5] – 2026-01-26
 
 ### ✨ New features

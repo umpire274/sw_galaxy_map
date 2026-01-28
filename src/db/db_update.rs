@@ -6,9 +6,9 @@ use std::collections::HashSet;
 use crate::db::provision::{
     meta_upsert_public, rebuild_planet_search_public, rebuild_planets_fts_if_enabled,
 };
-use crate::normalize::normalize_text;
 use crate::provision::arcgis;
 use crate::ui;
+use crate::utils::normalize::normalize_text;
 
 // ----------------------------
 // Stats collection (optional)
