@@ -13,7 +13,6 @@ use crate::cli::export::{
 };
 use crate::db::queries;
 use crate::model::RouteOptionsJson;
-use crate::normalize::normalize_text;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
 use crate::routing::geometry::dist as geom_dist;
@@ -23,6 +22,7 @@ use crate::routing::hyperspace::{
 };
 use crate::routing::route_debug::debug_print_route;
 use crate::routing::router::{RouteOptions, compute_route};
+use crate::utils::normalize::normalize_text;
 
 use crate::ui::Style;
 
@@ -853,7 +853,7 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
 }
 
 fn run_last(con: &Connection, from: &str, to: &str) -> Result<()> {
-    use crate::normalize::normalize_text;
+    use crate::utils::normalize::normalize_text;
 
     let from_norm = normalize_text(from);
     let to_norm = normalize_text(to);
@@ -977,6 +977,7 @@ fn run_prune(con: &mut Connection) -> Result<()> {
 }
 
 use crate::cli::validate;
+use crate::utils::formatting::truncate_ellipsis;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -1021,7 +1022,7 @@ fn run_list(con: &Connection, opts: RouteListOptions<'_>) -> Result<()> {
     let style = Style::default();
     let c = Colors::new(&style);
 
-    let rows = queries::list_routes(
+    let (rows, rows_count) = queries::list_routes(
         con,
         opts.limit,
         opts.status,
@@ -1080,47 +1081,89 @@ fn run_list(con: &Connection, opts: RouteListOptions<'_>) -> Result<()> {
         return Ok(());
     }
 
+    // print routes count number
+    let shown = rows.len();
+    let total = rows_count;
+
+    if total == 0 {
+        println!("{}", c.dim("Found 0 routes."));
+        println!("{}", c.dim("(none)"));
+        return Ok(());
+    }
+
+    if opts.limit > 0 && (shown as i64) < total as i64 {
+        println!(
+            "{}",
+            c.dim(format!(
+                "Found {} routes (showing {} of {}, limit={}).",
+                total, shown, total, opts.limit
+            ))
+        );
+    } else {
+        println!("{}", c.dim(format!("Found {} routes.", total)));
+    }
+
     // Header
     println!(
-        "{:>6}  {:<24}  {:<24}  {:<8}  {:>10}  {:>6}  {:>4}  {:>4}  UPDATED",
+        "{:>6}  {:<26}  {:<26}  {:<8}  {:>10}  {:>6}  {:>4}  {:>4}  UPDATED",
         "ID", "FROM", "TO", "STATUS", "LENGTH", "ITERS", "WP", "DET"
     );
 
     for r in rows {
         let from = format!("{} [{}]", r.from_planet_name, r.from_planet_fid);
         let to = format!("{} [{}]", r.to_planet_name, r.to_planet_fid);
-
-        let status = if r.status == "ok" {
-            c.ok(&r.status)
-        } else {
-            c.err(&r.status)
-        };
+        let from = truncate_ellipsis(&from, 26);
+        let to = truncate_ellipsis(&to, 26);
 
         let len_txt = r
             .length
-            .map(|v| format!("{:.3}", v))
-            .unwrap_or_else(|| "-".to_string());
+            .map(|v| format!("{:>10.3}", v))
+            .unwrap_or_else(|| format!("{:>10}", "-"));
+
         let it_txt = r
             .iterations
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string());
+            .map(|v| format!("{:>6}", v))
+            .unwrap_or_else(|| format!("{:>6}", "-"));
+
+        // PAD FIRST (plain)
+        let status_plain = format!("{:<8}", r.status);
+
+        // colorize AFTER padding
+        let status_txt = if r.status.eq_ignore_ascii_case("ok") {
+            c.ok(&status_plain)
+        } else {
+            c.err(&status_plain)
+        };
+
+        // WP / DET: pad first, then colorize
+        let wp_plain = format!("{:>4}", r.waypoints_count);
+        let det_plain = format!("{:>4}", r.detours_count);
+
+        let wp_txt = if r.waypoints_count == 0 {
+            c.dim(&wp_plain)
+        } else {
+            c.warn(&wp_plain)
+        };
+
+        let det_txt = if r.detours_count == 0 {
+            c.dim(&det_plain)
+        } else {
+            c.warn(&det_plain)
+        };
 
         let upd = r.updated_at.clone().unwrap_or_else(|| r.created_at.clone());
 
-        let wp_txt = if r.waypoints_count == 0 {
-            c.dim(r.waypoints_count.to_string())
-        } else {
-            c.warn(r.waypoints_count.to_string())
-        };
-        let det_txt = if r.detours_count == 0 {
-            c.dim(r.detours_count.to_string())
-        } else {
-            c.warn(r.detours_count.to_string())
-        };
-
         println!(
-            "{:>6}  {:<24}  {:<24}  {:<8}  {:>10}  {:>6}  {:>4}  {:>4}  {}",
-            r.id, from, to, status, len_txt, it_txt, wp_txt, det_txt, upd
+            "{:>6}  {:<26}  {:<26}  {}  {}  {}  {}  {}  {}",
+            r.id,
+            from,
+            to,
+            status_txt, // already width=8 visually
+            len_txt,    // already width=10
+            it_txt,     // already width=6
+            wp_txt,     // already width=4 visually
+            det_txt,    // already width=4 visually
+            upd
         );
     }
 

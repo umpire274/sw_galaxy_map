@@ -384,7 +384,7 @@ impl NavicomputerApp {
         }
     }
 
-    fn current_exe() -> Result<std::path::PathBuf, String> {
+    fn current_exe() -> Result<PathBuf, String> {
         std::env::current_exe().map_err(|e| format!("Failed to locate executable: {e}"))
     }
 
@@ -400,6 +400,15 @@ impl NavicomputerApp {
                 Ok((out, err, code))
             }
             Err(e) => Err(format!("Failed to execute command: {e}")),
+        }
+    }
+
+    fn append_non_empty(buf: &mut String, s: &str) {
+        if !s.trim().is_empty() {
+            buf.push_str(s);
+            if !s.ends_with('\n') {
+                buf.push('\n');
+            }
         }
     }
 
@@ -458,18 +467,8 @@ impl NavicomputerApp {
         // Append to GUI console output
         self.push_output_line(&format!("> {line}"));
 
-        if !out.trim().is_empty() {
-            self.output.push_str(&out);
-            if !out.ends_with('\n') {
-                self.output.push('\n');
-            }
-        }
-        if !err.trim().is_empty() {
-            self.output.push_str(&err);
-            if !err.ends_with('\n') {
-                self.output.push('\n');
-            }
-        }
+        NavicomputerApp::append_non_empty(&mut self.output, &out);
+        NavicomputerApp::append_non_empty(&mut self.output, &err);
 
         // JSON auto-detect: if stdout is valid JSON, cache it for export
         let out_trim = out.trim();

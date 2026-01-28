@@ -68,6 +68,11 @@ impl Colors {
         }
     }
 
+    #[inline]
+    pub fn red_alert(&self, s: &str) -> String {
+        format!("\x1b[41;97m{}\x1b[0m", s) // bg red (41), fg white (97)
+    }
+
     // Domain-specific helpers (policy)
     #[inline]
     pub fn from_name(&self, s: impl AsRef<str>) -> String {

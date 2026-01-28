@@ -56,6 +56,33 @@ pub struct Waypoint {
     pub updated_at: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct WaypointListRow {
+    pub waypoint: Waypoint,
+    pub links_count: i64,
+    pub routes_count: i64, // NEW
+}
+
+#[derive(Debug)]
+pub struct WaypointLinkRow {
+    pub planet_fid: i64,
+    pub planet_name: String,
+    pub role: String,
+    pub distance: Option<f64>,
+}
+
+#[derive(Debug)]
+pub struct WaypointRouteRow {
+    pub id: i64,
+    pub from_planet_fid: i64,
+    pub from_planet_name: String,
+    pub to_planet_fid: i64,
+    pub to_planet_name: String,
+    pub status: String,
+    pub length: Option<f64>,
+    pub updated_at: String,
+    pub occurrences: i64, // quante volte compare quel waypoint nella polyline
+}
 impl Waypoint {
     pub fn fmt_short(&self) -> String {
         format!(
@@ -65,6 +92,7 @@ impl Waypoint {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct WaypointPlanetLink {
     pub waypoint_id: i64,

@@ -8,7 +8,10 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
     long_about = "\
 Command-line and graphical navicomputer for exploring the Star Wars galaxy.
 
-Run without arguments to start the graphical navicomputer interface.
+Default behavior:
+  - Run without arguments to start the interactive CLI (v0.8+).
+  - Use --gui to start the graphical interface.
+  - Use subcommands for one-shot CLI operations.
 "
 )]
 pub struct Cli {
@@ -16,8 +19,14 @@ pub struct Cli {
     #[arg(long)]
     pub db: Option<String>,
 
+    /// Launch the graphical interface (GUI)
+    ///
+    /// Note: This flag is intended to be used without subcommands.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub gui: bool,
+
     #[command(subcommand)]
-    pub cmd: Commands,
+    pub cmd: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -227,6 +236,18 @@ pub enum WaypointCmd {
 
         /// Planet name or alias
         planet: String,
+    },
+
+    /// Remove orphan computed waypoints (not referenced by any route)
+    Prune {
+        /// Do not delete anything, just show what would be deleted
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Also prune computed waypoints even if they have planet links (waypoint_planets).
+        /// Links will be removed as part of the prune.
+        #[arg(long)]
+        include_linked: bool,
     },
 }
 

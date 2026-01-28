@@ -1,4 +1,4 @@
-use crate::normalize::normalize_text;
+use crate::utils::normalize::normalize_text;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;

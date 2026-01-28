@@ -1,7 +1,7 @@
 use crate::db::has_table;
 use crate::model::{
     AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, Waypoint,
-    WaypointPlanetLink,
+    WaypointLinkRow, WaypointListRow, WaypointPlanetLink, WaypointRouteRow,
 };
 pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
@@ -364,12 +364,38 @@ pub fn find_waypoint_by_norm(con: &Connection, name_norm: &str) -> Result<Option
     Ok(wp)
 }
 
-pub fn list_waypoints(con: &Connection, limit: usize, offset: usize) -> Result<Vec<Waypoint>> {
+pub fn list_waypoints(
+    con: &Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<(Vec<WaypointListRow>, usize)> {
+    use rusqlite::params;
+
+    // 1) total count (no limit/offset)
+    let total: i64 = con.query_row(r#"SELECT COUNT(*) FROM waypoints"#, [], |row| row.get(0))?;
+
+    // 2) list page with links_count via CTE
     let sql = format!(
         r#"
+        WITH
+          lp AS (
+            SELECT waypoint_id, COUNT(*) AS cnt
+            FROM waypoint_planets
+            GROUP BY waypoint_id
+          ),
+          rw AS (
+            SELECT waypoint_id, COUNT(*) AS cnt
+            FROM route_waypoints
+            WHERE waypoint_id IS NOT NULL
+            GROUP BY waypoint_id
+          )
         SELECT
-          {select}
+          {select},
+          COALESCE(lp.cnt, 0) AS links_count,
+          COALESCE(rw.cnt, 0) AS routes_count
         FROM waypoints w
+        LEFT JOIN lp ON lp.waypoint_id = w.id
+        LEFT JOIN rw ON rw.waypoint_id = w.id
         ORDER BY w.name COLLATE NOCASE
         LIMIT ?1 OFFSET ?2
         "#,
@@ -377,13 +403,25 @@ pub fn list_waypoints(con: &Connection, limit: usize, offset: usize) -> Result<V
     );
 
     let mut stmt = con.prepare(&sql)?;
-    let rows = stmt.query_map(params![limit as i64, offset as i64], waypoint_from_row)?;
 
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
+    let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
+        let wp = waypoint_from_row(row)?;
+        let links_count: i64 = row.get("links_count")?;
+        let routes_count: i64 = row.get("routes_count")?;
+
+        Ok(WaypointListRow {
+            waypoint: wp,
+            links_count,
+            routes_count,
+        })
+    })?;
+
+    let mut out: Vec<WaypointListRow> = Vec::new();
+    for r in rows {
+        out.push(r?);
     }
-    Ok(out)
+
+    Ok((out, total.max(0) as usize))
 }
 
 pub fn delete_waypoint(con: &Connection, id: i64) -> Result<usize> {
@@ -459,24 +497,30 @@ fn link_from_row(r: &Row<'_>) -> rusqlite::Result<WaypointPlanetLink> {
     })
 }
 
-pub fn list_links_for_waypoint(
-    con: &Connection,
-    waypoint_id: i64,
-) -> Result<Vec<WaypointPlanetLink>> {
+pub fn list_waypoint_links(con: &Connection, waypoint_id: i64) -> Result<Vec<WaypointLinkRow>> {
     let mut stmt = con.prepare(
         r#"
         SELECT
-          waypoint_id AS waypoint_id,
-          planet_fid  AS planet_fid,
-          role        AS role,
-          distance    AS distance
-        FROM waypoint_planets
-        WHERE waypoint_id = ?1
-        ORDER BY role, planet_fid
+          wp.planet_fid AS planet_fid,
+          p.Planet      AS planet_name,
+          COALESCE(wp.role, '') AS role,
+          wp.distance   AS distance
+        FROM waypoint_planets wp
+        JOIN planets p ON p.FID = wp.planet_fid
+        WHERE wp.waypoint_id = ?1
+        ORDER BY p.Planet COLLATE NOCASE
         "#,
     )?;
 
-    let rows = stmt.query_map([waypoint_id], link_from_row)?;
+    let rows = stmt.query_map([waypoint_id], |row| {
+        Ok(WaypointLinkRow {
+            planet_fid: row.get("planet_fid")?,
+            planet_name: row.get("planet_name")?,
+            role: row.get("role")?,
+            distance: row.get("distance")?,
+        })
+    })?;
+
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
@@ -484,6 +528,59 @@ pub fn list_links_for_waypoint(
     Ok(out)
 }
 
+pub fn list_routes_for_waypoint(
+    con: &Connection,
+    waypoint_id: i64,
+) -> Result<Vec<WaypointRouteRow>> {
+    let mut stmt = con.prepare(
+        r#"
+        SELECT
+          r.id AS id,
+
+          r.from_planet_fid AS from_planet_fid,
+          pf.Planet AS from_planet_name,
+
+          r.to_planet_fid AS to_planet_fid,
+          pt.Planet AS to_planet_name,
+
+          r.status AS status,
+          r.length AS length,
+
+          COALESCE(r.updated_at, r.created_at) AS updated_at,
+
+          COUNT(*) AS occurrences
+        FROM route_waypoints rw
+        JOIN routes r ON r.id = rw.route_id
+        JOIN planets pf ON pf.FID = r.from_planet_fid
+        JOIN planets pt ON pt.FID = r.to_planet_fid
+        WHERE rw.waypoint_id = ?1
+        GROUP BY
+          r.id, r.from_planet_fid, pf.Planet, r.to_planet_fid, pt.Planet,
+          r.status, r.length, COALESCE(r.updated_at, r.created_at)
+        ORDER BY COALESCE(r.updated_at, r.created_at) DESC, r.id DESC
+        "#,
+    )?;
+
+    let rows = stmt.query_map([waypoint_id], |row| {
+        Ok(WaypointRouteRow {
+            id: row.get("id")?,
+            from_planet_fid: row.get("from_planet_fid")?,
+            from_planet_name: row.get("from_planet_name")?,
+            to_planet_fid: row.get("to_planet_fid")?,
+            to_planet_name: row.get("to_planet_name")?,
+            status: row.get("status")?,
+            length: row.get("length")?,
+            updated_at: row.get("updated_at")?,
+            occurrences: row.get("occurrences")?,
+        })
+    })?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
 #[allow(dead_code)]
 pub fn list_links_for_planet(con: &Connection, planet_fid: i64) -> Result<Vec<WaypointPlanetLink>> {
     let mut stmt = con.prepare(
@@ -847,7 +944,7 @@ pub fn persist_route(
         let fp = detour_fingerprint(from_planet_fid, to_planet_fid, d);
 
         let wp_name = format!("Detour {}", fp.get(0..8).unwrap_or("detour"));
-        let wp_norm = crate::normalize::normalize_text(&wp_name);
+        let wp_norm = crate::utils::normalize::normalize_text(&wp_name);
 
         let (wp_id, _created) = upsert_computed_waypoint(
             &tx,
@@ -1145,23 +1242,24 @@ pub fn list_routes(
     to: Option<i64>,
     wp: Option<usize>,
     sort: crate::cli::args::RouteListSort,
-) -> Result<Vec<RouteListRow>> {
-    use rusqlite::ToSql;
+) -> Result<(Vec<RouteListRow>, usize)> {
+    use rusqlite::types::Value;
 
+    // ---------- Build WHERE + params ----------
     let mut where_parts: Vec<&'static str> = Vec::new();
-    let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+    let mut params: Vec<Value> = Vec::new();
 
     if let Some(s) = status {
         where_parts.push("r.status = ? COLLATE NOCASE");
-        params.push(Box::new(s.to_string()));
+        params.push(Value::Text(s.to_string()));
     }
     if let Some(fid) = from {
         where_parts.push("r.from_planet_fid = ?");
-        params.push(Box::new(fid));
+        params.push(Value::Integer(fid));
     }
     if let Some(fid) = to {
         where_parts.push("r.to_planet_fid = ?");
-        params.push(Box::new(fid));
+        params.push(Value::Integer(fid));
     }
 
     let order_sql = match sort {
@@ -1174,17 +1272,79 @@ pub fn list_routes(
         }
     };
 
-    let sql = if let Some(n) = wp {
-        // With --wp we filter by exact waypoint count => use CTE counts (fast/clean).
-        where_parts.push("COALESCE(wp.cnt, 0) = ?");
-        params.push(Box::new(n as i64));
+    // Helper to render WHERE
+    let mut where_sql = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
 
-        let where_sql = if where_parts.is_empty() {
-            String::new()
+    // If --wp is specified, we need wp.cnt in WHERE -> build CTE + add filter
+    let use_wp = wp.is_some();
+    if let Some(n) = wp {
+        // add wp filter (uses CTE alias)
+        if where_sql.is_empty() {
+            where_sql = "WHERE COALESCE(wp.cnt, 0) = ?".to_string();
         } else {
-            format!("WHERE {}", where_parts.join(" AND "))
-        };
+            where_sql.push_str(" AND COALESCE(wp.cnt, 0) = ?");
+        }
+        params.push(Value::Integer(n as i64));
+    }
 
+    // ---------- COUNT query ----------
+    let total: usize = if use_wp {
+        // With --wp we must include wp CTE + LEFT JOIN wp to filter by count
+        let sql_count = format!(
+            r#"
+            WITH
+              wp AS (
+                SELECT route_id, COUNT(*) AS cnt
+                FROM route_waypoints
+                GROUP BY route_id
+              )
+            SELECT COUNT(*)
+            FROM routes r
+            JOIN planets fp ON fp.FID = r.from_planet_fid
+            JOIN planets tp ON tp.FID = r.to_planet_fid
+            LEFT JOIN wp ON wp.route_id = r.id
+            {where_sql}
+            "#,
+            where_sql = where_sql
+        );
+
+        let n: i64 = con.query_row(
+            &sql_count,
+            rusqlite::params_from_iter(params.iter()),
+            |row| row.get(0),
+        )?;
+        n.max(0) as usize
+    } else {
+        // No --wp: lightweight count is enough (no correlated subqueries needed)
+        let sql_count = format!(
+            r#"
+            SELECT COUNT(*)
+            FROM routes r
+            JOIN planets fp ON fp.FID = r.from_planet_fid
+            JOIN planets tp ON tp.FID = r.to_planet_fid
+            {where_sql}
+            "#,
+            where_sql = where_sql
+        );
+
+        let n: i64 = con.query_row(
+            &sql_count,
+            rusqlite::params_from_iter(params.iter()),
+            |row| row.get(0),
+        )?;
+        n.max(0) as usize
+    };
+
+    // ---------- LIST query ----------
+    // limit always last parameter
+    let mut list_params = params.clone();
+    list_params.push(Value::Integer(limit as i64));
+
+    let sql_list = if use_wp {
         format!(
             r#"
             WITH
@@ -1223,16 +1383,11 @@ pub fn list_routes(
             {where_sql}
             {order_sql}
             LIMIT ?
-            "#
+            "#,
+            where_sql = where_sql,
+            order_sql = order_sql
         )
     } else {
-        // No --wp: keep it lightweight (correlated subqueries are fine with LIMIT 50).
-        let where_sql = if where_parts.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", where_parts.join(" AND "))
-        };
-
         format!(
             r#"
             SELECT
@@ -1258,18 +1413,15 @@ pub fn list_routes(
             {where_sql}
             {order_sql}
             LIMIT ?
-            "#
+            "#,
+            where_sql = where_sql,
+            order_sql = order_sql
         )
     };
 
-    // limit always last
-    params.push(Box::new(limit as i64));
-
-    let mut stmt = con.prepare(&sql)?;
-    let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref() as &dyn ToSql).collect();
-
+    let mut stmt = con.prepare(&sql_list)?;
     let rows = stmt
-        .query_map(param_refs.as_slice(), |row| {
+        .query_map(rusqlite::params_from_iter(list_params.iter()), |row| {
             Ok(RouteListRow {
                 id: row.get("id")?,
                 from_planet_fid: row.get("from_planet_fid")?,
@@ -1287,5 +1439,5 @@ pub fn list_routes(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    Ok(rows)
+    Ok((rows, total))
 }
