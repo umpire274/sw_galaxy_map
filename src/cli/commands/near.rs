@@ -1,4 +1,6 @@
-use crate::db::queries::{find_planet_for_info, near_planets, near_planets_excluding_fid};
+use crate::db::queries::{
+    find_planet_for_info, get_unknown_planet_by_fid, near_planets, near_planets_excluding_fid,
+};
 use crate::ui::{info, warning};
 use crate::utils::normalize::normalize_text;
 use anyhow::Result;
@@ -20,15 +22,46 @@ fn print_negative_hint() {
     println!("Tip: for negative coordinates use --x=-190 / --y=-190 (with '=')\n");
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     con: &Connection,
     r: f64,
+    unknown: bool,
+    fid: Option<i64>,
     planet: Option<String>,
     x: Option<f64>,
     y: Option<f64>,
     limit: i64,
 ) -> Result<()> {
-    let rows = if let Some(planet_name) = planet {
+    let rows = if unknown {
+        let fid = fid.ok_or_else(|| anyhow::anyhow!("--fid is required with --unknown"))?;
+        let unknown_planet = get_unknown_planet_by_fid(con, fid)?
+            .ok_or_else(|| anyhow::anyhow!("No unknown planet found for fid {}", fid))?;
+        let x = unknown_planet.x.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown planet fid {} has no X coordinate (reason: {}).",
+                fid,
+                unknown_planet.reason.as_deref().unwrap_or("missing_x")
+            )
+        })?;
+        let y = unknown_planet.y.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown planet fid {} has no Y coordinate (reason: {}).",
+                fid,
+                unknown_planet.reason.as_deref().unwrap_or("missing_y")
+            )
+        })?;
+        let name = unknown_planet
+            .planet
+            .unwrap_or_else(|| format!("(unknown fid {fid})"));
+
+        println!("Center: {} (X={:.3}, Y={:.3})", name, x, y);
+        println!("Radius: {:.3} parsecs", r);
+        println!("Limit: {}", limit);
+        println!();
+
+        near_planets(con, x, y, r, limit)?
+    } else if let Some(planet_name) = planet {
         let pn = normalize_text(&planet_name);
         let p = match find_planet_for_info(con, &pn)? {
             Some(p) => p,

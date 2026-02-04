@@ -138,6 +138,12 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     }
 
     // Related tables (may not exist in partial/old DBs)
+    if has_table(&con, "planets_unknown")? {
+        println!("  planets_unknown: {}", count(&con, "planets_unknown")?);
+    } else {
+        println!("  planets_unknown: -");
+    }
+
     if has_table(&con, "planet_aliases")? {
         println!("  planet_aliases: {}", count(&con, "planet_aliases")?);
     } else {

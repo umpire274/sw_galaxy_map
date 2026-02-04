@@ -78,14 +78,16 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
 
         args::Commands::Near {
             r,
+            unknown,
+            fid,
             planet,
             x,
             y,
             limit,
         } => {
-            validate::validate_near(planet, x, y)?;
+            validate::validate_near(*unknown, fid, planet, x, y)?;
             let con = open_db_migrating(cli.db.clone())?;
-            commands::near::run(&con, *r, planet.clone(), *x, *y, *limit)
+            commands::near::run(&con, *r, *unknown, *fid, planet.clone(), *x, *y, *limit)
         }
 
         args::Commands::Waypoint { cmd } => {
