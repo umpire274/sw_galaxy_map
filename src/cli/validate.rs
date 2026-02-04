@@ -55,6 +55,25 @@ pub fn validate_route_compute(from: &str, to: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn validate_route_planets(planets: &[String]) -> anyhow::Result<()> {
+    if planets.len() < 2 {
+        anyhow::bail!("Route compute requires at least two planets.");
+    }
+    for (idx, planet) in planets.iter().enumerate() {
+        if planet.trim().is_empty() {
+            anyhow::bail!("Planet {} cannot be empty.", idx + 1);
+        }
+    }
+    for window in planets.windows(2) {
+        let from = window[0].trim();
+        let to = window[1].trim();
+        if from.eq_ignore_ascii_case(to) {
+            anyhow::bail!("Adjacent planets must be different ({} → {}).", from, to);
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_limit(limit: i64, ctx: &str) -> anyhow::Result<()> {
     if limit <= 0 {
         anyhow::bail!("Invalid limit for {ctx}: {limit} (must be > 0)");

@@ -349,15 +349,14 @@ Same as route polyline:
 
 ### ✅ Persistence workflow (high-level)
 
-When running `route compute <from> <to>`:
-1. Resolve `from/to` to planet fids. 
-2. Compute the route in memory. 
-3. Upsert the route record in `routes` (unique per pair).
-4. Replace the associated polyline in `route_waypoints`. 
-5. Replace the associated decision log in `route_detours`. 
+When running `route compute <from> <to> [<via>...]`:
+1. Resolve the planet sequence to fids.
+2. Compute each leg in memory (FROM→TO, then TO→NEXT, etc.).
+3. Upsert each leg into `routes` (unique per pair).
+4. Replace the associated polylines in `route_waypoints`.
+5. Replace the associated decision logs in `route_detours`.
 6. For each detour waypoint:
    - upsert into `waypoints` if computed (via `fingerprint`)
    - optionally link waypoint ↔ planets in `waypoint_planets`
 
 This ensures that the database always holds the most recent “best known” route for each pair.
-
