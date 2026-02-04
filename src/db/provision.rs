@@ -90,6 +90,19 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_planets_xy          ON planets(X, Y);
 
         -- =========================
+        -- PLANETS UNKNOWN
+        -- =========================
+        DROP TABLE IF EXISTS planets_unknown;
+
+        CREATE TABLE planets_unknown (
+            fid    INTEGER,
+            planet TEXT,
+            x      REAL,
+            y      REAL,
+            reason TEXT
+        );
+
+        -- =========================
         -- WAYPOINTS (catalog)
         -- =========================
         DROP TABLE IF EXISTS waypoints;
@@ -371,7 +384,7 @@ pub fn insert_all(
     meta_upsert(&tx, "dataset_version", &meta.dataset_version)?;
     meta_upsert(&tx, "importer_version", &meta.importer_version)?;
     meta_upsert(&tx, "fts_enabled", if enable_fts { "1" } else { "0" })?;
-    meta_upsert(&tx, "schema_version", "4")?;
+    meta_upsert(&tx, "schema_version", "11")?;
 
     {
         let mut stmt = tx.prepare(

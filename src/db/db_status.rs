@@ -53,6 +53,12 @@ fn has_table(con: &Connection, name: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
+const LABEL_WIDTH: usize = 26;
+
+fn print_kv(label: &str, value: impl std::fmt::Display) {
+    println!("  {:<LABEL_WIDTH$} {}", label, value);
+}
+
 pub fn run(db_arg: Option<String>) -> Result<()> {
     let db_path = resolve_db_path(db_arg)?;
 
@@ -107,7 +113,7 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
                     print_epoch_millis_iso(&con, "source_dataLastEditDate")?
                 }
                 _ => {
-                    println!("  {}: {}", k, v);
+                    print_kv(k, v);
                 }
             }
         }
@@ -117,7 +123,7 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     println!();
     println!("Counts:");
     let planets_total = count(&con, "planets")?;
-    println!("  planets: {}", planets_total);
+    print_kv("planets", planets_total);
 
     // If 'deleted' column exists, show active vs deleted breakdown.
     // We detect by trying a query; if it fails, we just skip the breakdown.
@@ -129,8 +135,8 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     match active {
         Ok(Some(active_n)) => {
             let deleted_n = planets_total - active_n;
-            println!("  active_planets (deleted=0): {}", active_n);
-            println!("  deleted_planets (deleted=1): {}", deleted_n);
+            print_kv("active_planets (deleted=0)", active_n);
+            print_kv("deleted_planets (deleted=1)", deleted_n);
         }
         _ => {
             // older schema: no 'deleted' column or query failed; ignore
@@ -138,28 +144,34 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     }
 
     // Related tables (may not exist in partial/old DBs)
-    if has_table(&con, "planet_aliases")? {
-        println!("  planet_aliases: {}", count(&con, "planet_aliases")?);
+    if has_table(&con, "planets_unknown")? {
+        print_kv("planets_unknown", count(&con, "planets_unknown")?);
     } else {
-        println!("  planet_aliases: -");
+        print_kv("planets_unknown", "-");
+    }
+
+    if has_table(&con, "planet_aliases")? {
+        print_kv("planet_aliases", count(&con, "planet_aliases")?);
+    } else {
+        print_kv("planet_aliases", "-");
     }
 
     if has_table(&con, "planet_search")? {
-        println!("  planet_search: {}", count(&con, "planet_search")?);
+        print_kv("planet_search", count(&con, "planet_search")?);
     } else {
-        println!("  planet_search: -");
+        print_kv("planet_search", "-");
     }
 
     // --- Schema checks
     println!();
     println!("Schema:");
-    println!(
-        "  v_planets_clean: {}",
+    print_kv(
+        "v_planets_clean",
         if has_view(&con, "v_planets_clean")? {
             "present"
         } else {
             "missing"
-        }
+        },
     );
 
     // --- FTS checks
@@ -167,19 +179,16 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     println!("FTS:");
     let fts_enabled = get_meta(&con, "fts_enabled")?;
     let meta_flag = matches!(fts_enabled.as_deref(), Some("1"));
-    println!(
-        "  meta.fts_enabled: {}",
-        fts_enabled.as_deref().unwrap_or("-")
-    );
+    print_kv("meta.fts_enabled", fts_enabled.as_deref().unwrap_or("-"));
 
     let fts_table = has_table(&con, "planets_fts")?;
-    println!(
-        "  planets_fts table: {}",
-        if fts_table { "present" } else { "missing" }
+    print_kv(
+        "planets_fts table",
+        if fts_table { "present" } else { "missing" },
     );
 
     if fts_table {
-        println!("  planets_fts rows: {}", count(&con, "planets_fts")?);
+        print_kv("planets_fts rows", count(&con, "planets_fts")?);
     }
 
     if meta_flag && !fts_table {
