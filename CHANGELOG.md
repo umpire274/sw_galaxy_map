@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## v0.8.1 — 2026-02-10
+
+### Added
+
+- `route compute` now accepts two or more planets to compute multi-leg trips in one command.
+
 ## v0.8.0 — 2026-01-28
 
 ### ⚠️ Breaking change

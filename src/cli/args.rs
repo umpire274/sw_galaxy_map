@@ -260,7 +260,7 @@ pub enum RouteListSort {
 
 #[derive(Subcommand, Debug)]
 pub enum RouteCmd {
-    /// Compute and persist a route between two planets (name or alias)
+    /// Compute and persist a route between two or more planets (name or alias)
     Compute(RouteComputeArgs),
 
     /// Show a persisted route by id
@@ -326,11 +326,9 @@ pub enum RouteCmd {
 
 #[derive(Args, Debug)]
 pub struct RouteComputeArgs {
-    /// Start planet name (or alias)
-    pub from: String,
-
-    /// Destination planet name (or alias)
-    pub to: String,
+    /// Planet names (or aliases), in travel order
+    #[arg(required = true, num_args = 2.., value_name = "PLANET")]
+    pub planets: Vec<String>,
 
     /// Safety radius in parsecs used to model a planet's hyperspace no-fly zone.
     ///
