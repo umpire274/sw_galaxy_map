@@ -181,13 +181,18 @@ impl NavicomputerApp {
             }
 
             "route" => {
-                // route compute <from> <to>, route show <id>, route explain <id>...
+                // route compute <from> <to> [<via>...], route show <id>, route explain <id>...
                 if tokens.len() >= 2 {
                     match tokens[1].as_str() {
                         "compute" => {
-                            let from = tokens.get(2).map(|s| s.as_str()).unwrap_or("");
-                            let to = tokens.get(3).map(|s| s.as_str()).unwrap_or("");
-                            validate::validate_route_compute(from, to)?;
+                            let mut planets = Vec::new();
+                            for token in tokens.iter().skip(2) {
+                                if token.starts_with('-') {
+                                    break;
+                                }
+                                planets.push(token.clone());
+                            }
+                            validate::validate_route_planets(&planets)?;
                         }
                         "show" => {
                             let id = tokens
@@ -822,7 +827,7 @@ impl eframe::App for NavicomputerApp {
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut self.command)
                                 .id(cmd_id)
-                                .hint_text(r#"e.g. route compute "Corellia" "Tatooine""#)
+                                .hint_text(r#"e.g. route compute "Corellia" "Tatooine" "Hoth""#)
                                 .desired_width(800.0)
                                 .interactive(true)
                                 .frame(false),
