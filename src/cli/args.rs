@@ -133,6 +133,9 @@ pub enum DbCommands {
         stats_limit: usize,
     },
 
+    /// Emit JSON listing the most recently skipped planets during db update
+    SkippedPlanets,
+
     /// Migrate the local database to the latest schema version
     Migrate {
         /// Show what migrations would be applied without executing them

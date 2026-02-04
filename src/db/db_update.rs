@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -9,6 +10,7 @@ use crate::db::provision::{
 use crate::provision::arcgis;
 use crate::ui;
 use crate::utils::normalize::normalize_text;
+use crate::utils::time::now_utc_iso;
 
 // ----------------------------
 // Stats collection (optional)
@@ -27,6 +29,18 @@ struct ChangeEvent {
     kind: ChangeKind,
     planet: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedPlanetRow {
+    pub fid: Option<i64>,
+    pub planet: Option<String>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub reasons: Vec<String>,
+}
+
+pub const META_SKIPPED_PLANETS_JSON: &str = "skipped_planets_json";
+pub const META_SKIPPED_PLANETS_UPDATED_AT: &str = "skipped_planets_updated_at";
 
 fn compute_arcgis_hash(a: &Value) -> String {
     // Must match the one used in provision (keep in sync)
@@ -300,6 +314,7 @@ pub fn run(
     let mut skipped_missing_planet: i64 = 0;
     let mut skipped_missing_x: i64 = 0;
     let mut skipped_missing_y: i64 = 0;
+    let mut skipped_rows: Vec<SkippedPlanetRow> = Vec::new();
 
     // Helper to capture best-effort planet name
     let planet_name = |a: &Value| -> Option<String> {
@@ -315,6 +330,13 @@ pub fn run(
             Some(v) => v,
             None => {
                 skipped += 1;
+                skipped_rows.push(SkippedPlanetRow {
+                    fid: None,
+                    planet: planet_name(a),
+                    x: get_f(a, "X"),
+                    y: get_f(a, "Y"),
+                    reasons: vec!["missing_fid".to_string()],
+                });
                 continue;
             }
         };
@@ -342,6 +364,24 @@ pub fn run(
             if !y_ok {
                 skipped_missing_y += 1;
             }
+
+            let mut reasons = Vec::new();
+            if !planet_ok {
+                reasons.push("missing_planet".to_string());
+            }
+            if !x_ok {
+                reasons.push("missing_x".to_string());
+            }
+            if !y_ok {
+                reasons.push("missing_y".to_string());
+            }
+            skipped_rows.push(SkippedPlanetRow {
+                fid: Some(fid),
+                planet: planet_name(a),
+                x: get_f(a, "X"),
+                y: get_f(a, "Y"),
+                reasons,
+            });
 
             continue;
         }
@@ -446,6 +486,11 @@ pub fn run(
         meta_upsert_public(&tx, "last_update_utc", &crate::utils::time::now_utc_iso())?;
         meta_upsert_public(&tx, "update_mode", "incremental")?;
         meta_upsert_public(&tx, "prune_used", if prune { "1" } else { "0" })?;
+
+        if let Ok(skipped_json) = serde_json::to_string_pretty(&skipped_rows) {
+            meta_upsert_public(&tx, META_SKIPPED_PLANETS_JSON, &skipped_json)?;
+            meta_upsert_public(&tx, META_SKIPPED_PLANETS_UPDATED_AT, &now_utc_iso())?;
+        }
 
         tx.commit().context("Failed to commit db update")?;
 

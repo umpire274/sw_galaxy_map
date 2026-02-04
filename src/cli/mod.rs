@@ -53,6 +53,11 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
                 crate::db::db_update::run(&mut con, *prune, *dry_run, *stats, *stats_limit)
             }
 
+            args::DbCommands::SkippedPlanets => {
+                let mut con = open_db_migrating(cli.db.clone())?;
+                crate::db::db_skipped_planets::run(&mut con)
+            }
+
             args::DbCommands::Migrate { dry_run } => {
                 // IMPORTANT: do not auto-migrate before running migrate
                 let mut con = open_db_raw(cli.db.clone())?;

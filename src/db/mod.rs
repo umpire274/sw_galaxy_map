@@ -1,5 +1,6 @@
 pub mod core;
 pub mod db_init;
+pub mod db_skipped_planets;
 pub mod db_status;
 pub mod db_update;
 pub mod migrate;
