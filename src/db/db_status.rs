@@ -1,5 +1,6 @@
 use crate::ui::{error, success, warning};
 use anyhow::{Context, Result};
+use owo_colors::OwoColorize;
 use rusqlite::{Connection, OptionalExtension};
 use std::fs;
 use std::path::PathBuf;
@@ -53,7 +54,7 @@ fn has_table(con: &Connection, name: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
-const LABEL_WIDTH: usize = 26;
+const LABEL_WIDTH: usize = 35;
 
 fn print_kv(label: &str, value: impl std::fmt::Display) {
     println!("  {:<LABEL_WIDTH$} {}", label, value);
@@ -123,7 +124,7 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     println!();
     println!("Counts:");
     let planets_total = count(&con, "planets")?;
-    print_kv("planets", planets_total);
+    print_kv("planets", planets_total.to_string().green());
 
     // If 'deleted' column exists, show active vs deleted breakdown.
     // We detect by trying a query; if it fails, we just skip the breakdown.
@@ -135,8 +136,8 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
     match active {
         Ok(Some(active_n)) => {
             let deleted_n = planets_total - active_n;
-            print_kv("active_planets (deleted=0)", active_n);
-            print_kv("deleted_planets (deleted=1)", deleted_n);
+            print_kv("active_planets (deleted=0)", active_n.to_string().green());
+            print_kv("deleted_planets (deleted=1)", deleted_n.to_string().red());
         }
         _ => {
             // older schema: no 'deleted' column or query failed; ignore
@@ -145,19 +146,28 @@ pub fn run(db_arg: Option<String>) -> Result<()> {
 
     // Related tables (may not exist in partial/old DBs)
     if has_table(&con, "planets_unknown")? {
-        print_kv("planets_unknown", count(&con, "planets_unknown")?);
+        print_kv(
+            "planets_unknown",
+            count(&con, "planets_unknown")?.to_string().yellow(),
+        );
     } else {
         print_kv("planets_unknown", "-");
     }
 
     if has_table(&con, "planet_aliases")? {
-        print_kv("planet_aliases", count(&con, "planet_aliases")?);
+        print_kv(
+            "planet_aliases",
+            count(&con, "planet_aliases")?.to_string().bright_black(),
+        );
     } else {
         print_kv("planet_aliases", "-");
     }
 
     if has_table(&con, "planet_search")? {
-        print_kv("planet_search", count(&con, "planet_search")?);
+        print_kv(
+            "planet_search",
+            count(&con, "planet_search")?.to_string().bright_black(),
+        );
     } else {
         print_kv("planet_search", "-");
     }
@@ -205,7 +215,7 @@ fn print_epoch_millis_iso(con: &Connection, key: &str) -> Result<()> {
         && let Ok(ms) = ms.parse::<i64>()
         && let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
     {
-        println!("  {}_iso: {}", key, dt.to_rfc3339());
+        print_kv(format!("{}_iso", key).as_str(), dt.to_rfc3339());
     }
     Ok(())
 }

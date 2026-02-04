@@ -110,7 +110,13 @@ fn run_gui() -> Result<()> {
 fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
     use std::io::{self, Write};
 
-    println!("Interactive mode (v0.8.0). Type 'help' or 'exit'.");
+    println!(
+        "{}",
+        format_args!(
+            "Interactive mode ({}). Type 'help' or 'exit'.",
+            env!("CARGO_PKG_VERSION").to_string()
+        )
+    );
     println!(
         "Tip: commands are the same as one-shot CLI (e.g. `search scarif`, `route show 42`).\n"
     );
@@ -237,7 +243,7 @@ fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn split_args(line: &str) -> anyhow::Result<Vec<String>> {
+fn split_args(line: &str) -> Result<Vec<String>> {
     Ok(shell_words::split(line)?)
 }
 
