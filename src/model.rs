@@ -43,6 +43,14 @@ pub struct NearHit {
 }
 
 #[derive(Debug)]
+pub struct UnknownPlanet {
+    pub planet: Option<String>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct Waypoint {
     pub id: i64,
     pub name: String,

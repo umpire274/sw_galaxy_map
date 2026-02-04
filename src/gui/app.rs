@@ -109,6 +109,8 @@ impl NavicomputerApp {
                 let mut planet: Option<String> = None;
                 let mut x: Option<f64> = None;
                 let mut y: Option<f64> = None;
+                let mut unknown = false;
+                let mut fid: Option<i64> = None;
 
                 let mut i = 1usize;
                 while i < tokens.len() {
@@ -120,6 +122,23 @@ impl NavicomputerApp {
                     }
                     if let Some(v) = t.strip_prefix("--planet=") {
                         planet = Some(v.to_string());
+                        i += 1;
+                        continue;
+                    }
+
+                    if t == "--unknown" {
+                        unknown = true;
+                        i += 1;
+                        continue;
+                    }
+
+                    if t == "--fid" && i + 1 < tokens.len() {
+                        fid = tokens[i + 1].parse::<i64>().ok();
+                        i += 2;
+                        continue;
+                    }
+                    if let Some(v) = t.strip_prefix("--fid=") {
+                        fid = v.parse::<i64>().ok();
                         i += 1;
                         continue;
                     }
@@ -149,7 +168,7 @@ impl NavicomputerApp {
                     i += 1;
                 }
 
-                validate::validate_near(&planet, &x, &y)?;
+                validate::validate_near(unknown, &fid, &planet, &x, &y)?;
             }
 
             "search" => {
