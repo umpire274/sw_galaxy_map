@@ -104,7 +104,10 @@ fn run_compute(con: &mut Connection, args: &RouteComputeArgs) -> Result<()> {
                 computed.to_p.planet
             );
         } else {
-            println!("Route: {} → {}", computed.from_p.planet, computed.to_p.planet);
+            println!(
+                "Route: {} → {}",
+                computed.from_p.planet, computed.to_p.planet
+            );
         }
 
         println!("Route ID: {}", computed.route_id);
