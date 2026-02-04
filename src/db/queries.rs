@@ -1,7 +1,7 @@
 use crate::db::has_table;
 use crate::model::{
-    AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, Waypoint,
-    WaypointLinkRow, WaypointListRow, WaypointPlanetLink, WaypointRouteRow,
+    AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, UnknownPlanet,
+    Waypoint, WaypointLinkRow, WaypointListRow, WaypointPlanetLink, WaypointRouteRow,
 };
 pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
@@ -109,6 +109,28 @@ pub fn find_planet_for_info(con: &Connection, key_norm: &str) -> Result<Option<P
         return Ok(Some(p));
     }
     find_planet_by_alias_norm(con, key_norm)
+}
+
+pub fn get_unknown_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<UnknownPlanet>> {
+    con.query_row(
+        r#"
+        SELECT planet, x, y, reason
+        FROM planets_unknown
+        WHERE fid = ?1
+        LIMIT 1
+        "#,
+        [fid],
+        |r| {
+            Ok(UnknownPlanet {
+                planet: r.get(0)?,
+                x: r.get(1)?,
+                y: r.get(2)?,
+                reason: r.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .context("Failed to query planets_unknown")
 }
 
 pub fn get_aliases(con: &Connection, fid: i64) -> Result<Vec<AliasRow>> {

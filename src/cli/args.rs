@@ -51,12 +51,21 @@ pub enum Commands {
     ///
     /// Notes:
     /// - If you provide `--planet`, the planet coordinates are used as the center.
+    /// - If you provide `--unknown`, the coordinates are read from `planets_unknown`.
     /// - Otherwise you must provide both `--x` and `--y`.
     /// - For negative coordinates, use the `=` form (e.g. `--y=-190`) to avoid CLI parsing ambiguity.
     Near {
         /// Radius (parsecs)
         #[arg(long)]
         r: f64,
+
+        /// Center the search around an unknown planet (in planets_unknown)
+        #[arg(long, action = ArgAction::SetTrue)]
+        unknown: bool,
+
+        /// Unknown planet FID (requires --unknown)
+        #[arg(long)]
+        fid: Option<i64>,
 
         /// Center the search around a planet (by name)
         #[arg(long)]

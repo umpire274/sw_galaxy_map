@@ -4,7 +4,27 @@ use anyhow::{Result, bail};
 pub const TIP_NEGATIVE_COORDS: &str =
     "Note: for negative coordinates, use the '=' form, e.g.:\n  near --r 50 --x=7100 --y=-190";
 
-pub fn validate_near(planet: &Option<String>, x: &Option<f64>, y: &Option<f64>) -> Result<()> {
+pub fn validate_near(
+    unknown: bool,
+    fid: &Option<i64>,
+    planet: &Option<String>,
+    x: &Option<f64>,
+    y: &Option<f64>,
+) -> Result<()> {
+    if unknown {
+        if fid.is_none() {
+            bail!("--fid is required when using --unknown.");
+        }
+        if planet.is_some() || x.is_some() || y.is_some() {
+            bail!("--unknown cannot be combined with --planet, --x, or --y.");
+        }
+        return Ok(());
+    }
+
+    if fid.is_some() {
+        bail!("--fid can only be used with --unknown.");
+    }
+
     if planet.is_some() {
         return Ok(());
     }
