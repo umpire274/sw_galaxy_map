@@ -492,6 +492,7 @@ pub fn run(
         for row in &skipped_rows {
             stmt.execute(params![row.fid, row.planet, row.x, row.y, row.reason])?;
         }
+        drop(stmt);
 
         tx.commit().context("Failed to commit db update")?;
 

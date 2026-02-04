@@ -40,7 +40,8 @@ pub fn run(con: &mut Connection) -> Result<()> {
         out.push(row?);
     }
 
-    let json = serde_json::to_string_pretty(&out).context("Failed to encode skipped planets JSON")?;
+    let json =
+        serde_json::to_string_pretty(&out).context("Failed to encode skipped planets JSON")?;
     println!("{json}");
 
     Ok(())
