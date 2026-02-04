@@ -1,26 +1,47 @@
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
+use serde::Serialize;
+use serde_json;
 
-use crate::db::db_update::META_SKIPPED_PLANETS_JSON;
+#[derive(Debug, Serialize)]
+struct SkippedPlanetRow {
+    fid: Option<i64>,
+    planet: Option<String>,
+    x: Option<f64>,
+    y: Option<f64>,
+    reason: String,
+}
 
 pub fn run(con: &mut Connection) -> Result<()> {
-    let skipped_json: Option<String> = con
-        .query_row(
-            "SELECT value FROM meta WHERE key = ?1",
-            [META_SKIPPED_PLANETS_JSON],
-            |r| r.get(0),
+    let mut stmt = con
+        .prepare(
+            r#"
+            SELECT fid, planet, x, y, reason
+            FROM planets_unknown
+            ORDER BY fid
+            "#,
         )
-        .optional()
-        .context("Failed to read skipped planets metadata")?;
+        .context("Failed to query skipped planets table")?;
 
-    match skipped_json {
-        Some(json) => {
-            println!("{json}");
-        }
-        None => {
-            println!("[]");
-        }
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(SkippedPlanetRow {
+                fid: r.get(0)?,
+                planet: r.get(1)?,
+                x: r.get(2)?,
+                y: r.get(3)?,
+                reason: r.get(4)?,
+            })
+        })
+        .context("Failed to read skipped planets rows")?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
     }
+
+    let json = serde_json::to_string_pretty(&out).context("Failed to encode skipped planets JSON")?;
+    println!("{json}");
 
     Ok(())
 }

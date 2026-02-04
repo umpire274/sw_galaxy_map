@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -10,7 +9,6 @@ use crate::db::provision::{
 use crate::provision::arcgis;
 use crate::ui;
 use crate::utils::normalize::normalize_text;
-use crate::utils::time::now_utc_iso;
 
 // ----------------------------
 // Stats collection (optional)
@@ -30,17 +28,14 @@ struct ChangeEvent {
     planet: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SkippedPlanetRow {
     pub fid: Option<i64>,
     pub planet: Option<String>,
     pub x: Option<f64>,
     pub y: Option<f64>,
-    pub reasons: Vec<String>,
+    pub reason: String,
 }
-
-pub const META_SKIPPED_PLANETS_JSON: &str = "skipped_planets_json";
-pub const META_SKIPPED_PLANETS_UPDATED_AT: &str = "skipped_planets_updated_at";
 
 fn compute_arcgis_hash(a: &Value) -> String {
     // Must match the one used in provision (keep in sync)
@@ -335,7 +330,7 @@ pub fn run(
                     planet: planet_name(a),
                     x: get_f(a, "X"),
                     y: get_f(a, "Y"),
-                    reasons: vec!["missing_fid".to_string()],
+                    reason: "missing_fid".to_string(),
                 });
                 continue;
             }
@@ -380,7 +375,7 @@ pub fn run(
                 planet: planet_name(a),
                 x: get_f(a, "X"),
                 y: get_f(a, "Y"),
-                reasons,
+                reason: reasons.join(","),
             });
 
             continue;
@@ -487,9 +482,15 @@ pub fn run(
         meta_upsert_public(&tx, "update_mode", "incremental")?;
         meta_upsert_public(&tx, "prune_used", if prune { "1" } else { "0" })?;
 
-        if let Ok(skipped_json) = serde_json::to_string_pretty(&skipped_rows) {
-            meta_upsert_public(&tx, META_SKIPPED_PLANETS_JSON, &skipped_json)?;
-            meta_upsert_public(&tx, META_SKIPPED_PLANETS_UPDATED_AT, &now_utc_iso())?;
+        tx.execute("DELETE FROM planets_unknown", [])?;
+        let mut stmt = tx.prepare_cached(
+            r#"
+            INSERT INTO planets_unknown(fid, planet, x, y, reason)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+        )?;
+        for row in &skipped_rows {
+            stmt.execute(params![row.fid, row.planet, row.x, row.y, row.reason])?;
         }
 
         tx.commit().context("Failed to commit db update")?;

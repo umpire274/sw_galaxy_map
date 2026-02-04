@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
 const START_SCHEMA_VERSION: i64 = 3;
-const LATEST_SCHEMA_VERSION: i64 = 10;
+const LATEST_SCHEMA_VERSION: i64 = 11;
 
 struct MigrationStep {
     from: i64,
@@ -55,6 +55,12 @@ fn migration_steps() -> &'static [MigrationStep] {
             to: 10,
             label: "routes status index",
             apply: m_to_v10,
+        },
+        MigrationStep {
+            from: 10,
+            to: 11,
+            label: "planets unknown table",
+            apply: m_to_v11,
         },
     ]
 }
@@ -361,6 +367,23 @@ fn m_to_v10(tx: &Transaction<'_>) -> Result<()> {
         "#,
     )
     .context("Failed to migrate schema to v10 (creation idx_routes_status index)")?;
+
+    Ok(())
+}
+
+fn m_to_v11(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS planets_unknown (
+          fid    INTEGER,
+          planet TEXT,
+          x      REAL,
+          y      REAL,
+          reason TEXT
+        );
+        "#,
+    )
+    .context("Failed to migrate schema to v11 (create planets_unknown table)")?;
 
     Ok(())
 }
