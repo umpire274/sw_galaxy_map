@@ -19,11 +19,11 @@ pub struct Cli {
     #[arg(long)]
     pub db: Option<String>,
 
-    /// Launch the graphical interface (GUI)
+    /// Launch the command line interface (CLI)
     ///
     /// Note: This flag is intended to be used without subcommands.
     #[arg(long, action = ArgAction::SetTrue)]
-    pub gui: bool,
+    pub cli: bool,
 
     #[command(subcommand)]
     pub cmd: Option<Commands>,

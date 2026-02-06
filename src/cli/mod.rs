@@ -16,15 +16,16 @@ pub fn run() -> Result<()> {
     println!();
 
     // Enforce: --gui must be used without subcommands
-    if cli.gui && cli.cmd.is_some() {
+    if cli.cli && cli.cmd.is_some() {
         bail!(
-            "'--gui' cannot be used together with subcommands. Run either '--gui' or a CLI command."
+            "'--cli' cannot be used together with subcommands. Run either '--cli' or a GUI windows."
         );
     }
 
-    // 1) GUI explicit
-    if cli.gui {
-        return run_gui();
+    // 1) CLI explicit
+    if cli.cli {
+        return run_interactive_shell(cli.db.clone());
+
     }
 
     // 2) One-shot CLI
@@ -32,8 +33,8 @@ pub fn run() -> Result<()> {
         return run_one_shot(&cli, cmd);
     }
 
-    // 3) Default: interactive CLI
-    run_interactive_shell(cli.db.clone())
+    // 3) Default: GUI interactive
+    run_gui()
 }
 
 fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
@@ -212,9 +213,9 @@ fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
         match args::Cli::try_parse_from(argv) {
             Ok(cli) => {
                 // Enforce same rule as non-interactive: --gui not allowed here
-                if cli.gui {
+                if cli.cli {
                     println!(
-                        "Error: '--gui' is not available inside interactive mode. Use ':exit' then run `sw_galaxy_map --gui`."
+                        "Error: '--cli' is not available inside GUI window. Use ':exit' then run `sw_galaxy_map --cli`."
                     );
                     continue;
                 }
