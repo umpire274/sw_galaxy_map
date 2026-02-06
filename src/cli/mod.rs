@@ -25,7 +25,6 @@ pub fn run() -> Result<()> {
     // 1) CLI explicit
     if cli.cli {
         return run_interactive_shell(cli.db.clone());
-
     }
 
     // 2) One-shot CLI
