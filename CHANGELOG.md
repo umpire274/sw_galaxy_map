@@ -7,11 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## v0.8.2 — 2026-02-06
+
+### Added
+
+- Optional **sublight travel time estimation** (km/s) alongside hyperspace ETA.
+- `waypoint prune --include-linked` to remove orphan `computed` waypoints even when linked to planets (links are removed
+  as part of prune).
+
+### Changed
+
+- **Startup behavior adjusted**:
+    - Running `sw_galaxy_map` with **no arguments** now launches the **GUI**.
+    - The **CLI must be explicitly requested** using the `--cli` flag.
+- Refactored route polyline length computation into a shared helper to remove duplication.
+- Improved `waypoint list` UX:
+    - orphan marker (`*`) for linked waypoints not used by any route
+    - conditional legend line printed only when needed
+    - stable table layout with truncation and padding.
+
+### Fixed
+
+- Clippy/lint cleanups under `-D warnings` (precision constants, unused helpers/models).
+
+---
+
 ## v0.8.1 — 2026-02-10
 
 ### Added
 
 - `route compute` now accepts two or more planets to compute multi-leg trips in one command.
+
+---
 
 ## v0.8.0 — 2026-01-28
 

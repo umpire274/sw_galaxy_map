@@ -64,3 +64,13 @@ pub fn polyline_length_parsec(points: &[(f64, f64)]) -> f64 {
         })
         .sum()
 }
+
+pub fn polyline_length_waypoints_parsec<T>(wps: &[T], mut xy: impl FnMut(&T) -> (f64, f64)) -> f64 {
+    wps.windows(2)
+        .map(|w| {
+            let (x1, y1) = xy(&w[0]);
+            let (x2, y2) = xy(&w[1]);
+            dist(Point::new(x1, y1), Point::new(x2, y2))
+        })
+        .sum()
+}

@@ -16,13 +16,14 @@ use crate::model::Planet;
 use crate::model::RouteOptionsJson;
 use crate::routing::collision::Obstacle;
 use crate::routing::geometry::Point;
-use crate::routing::geometry::dist as geom_dist;
+use crate::routing::geometry::{dist as geom_dist, polyline_length_waypoints_parsec};
 use crate::routing::hyperspace::{
     DetourPenaltyParams, GalacticRegion, detour_penalty_multiplier, estimate_travel_time_hours,
     extract_galactic_region,
 };
 use crate::routing::route_debug::debug_print_route;
 use crate::routing::router::{RouteOptions, compute_route};
+use crate::routing::sublight::estimate_sublight_time_hours;
 use crate::utils::normalize::normalize_text;
 
 use crate::ui::Style;
@@ -502,6 +503,30 @@ fn parse_region_blend(s: &str) -> RegionBlend {
     }
 }
 
+fn format_duration_compact(hours: f64) -> String {
+    if !hours.is_finite() || hours < 0.0 {
+        return "-".to_string();
+    }
+    if hours < 24.0 {
+        return format!("{:.1} h", hours);
+    }
+    let days = hours / 24.0;
+    if days < 365.0 {
+        return format!("{:.1} d", days);
+    }
+    let years = days / 365.25;
+    if years < 1000.0 {
+        return format!("{:.1} y", years);
+    }
+    let kyr = years / 1000.0;
+    if kyr < 1000.0 {
+        return format!("{:.1} kyr", kyr);
+    }
+    let myr = kyr / 1000.0;
+
+    format!("{:.1} Myr", myr)
+}
+
 fn compute_eta_summary(
     con: &Connection,
     loaded: &queries::RouteLoaded,
@@ -518,15 +543,7 @@ fn compute_eta_summary(
     }
 
     // Geometric route length (polyline)
-    let route_len: f64 = loaded
-        .waypoints
-        .windows(2)
-        .map(|w| {
-            let p1 = Point::new(w[0].x, w[0].y);
-            let p2 = Point::new(w[1].x, w[1].y);
-            geom_dist(p1, p2)
-        })
-        .sum();
+    let route_len: f64 = polyline_length_waypoints_parsec(&loaded.waypoints, |w| (w.x, w.y));
 
     let a = loaded.waypoints.first().unwrap();
     let b = loaded.waypoints.last().unwrap();
@@ -766,6 +783,24 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
             DEFAULT_SEVERITY_K,
         ) {
             println!("{}", eta);
+        }
+
+        // Optional: sublight ETA (km/s), useful for local-system travel heuristics.
+        if let Some(kmps) = args.sublight_kmps
+            && kmps > 0.0
+        {
+            // Use geometric polyline length for consistency with the hyperspace ETA model.
+            let route_len_geom: f64 =
+                polyline_length_waypoints_parsec(&loaded.waypoints, |w| (w.x, w.y));
+
+            if route_len_geom > 0.0 {
+                let h = estimate_sublight_time_hours(route_len_geom, kmps);
+                println!(
+                    "ETA (sublight, {:.0} km/s): {}",
+                    kmps,
+                    format_duration_compact(h)
+                );
+            }
         }
     }
 

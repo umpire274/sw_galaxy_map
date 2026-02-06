@@ -19,11 +19,11 @@ pub struct Cli {
     #[arg(long)]
     pub db: Option<String>,
 
-    /// Launch the graphical interface (GUI)
+    /// Launch the command line interface (CLI)
     ///
     /// Note: This flag is intended to be used without subcommands.
     #[arg(long, action = ArgAction::SetTrue)]
-    pub gui: bool,
+    pub cli: bool,
 
     #[command(subcommand)]
     pub cmd: Option<Commands>,
@@ -414,4 +414,10 @@ pub struct RouteExplainArgs {
     /// Region blend strategy: avg | conservative | <from_weight>
     #[arg(long = "region-blend", default_value = "avg")]
     pub region_blend: String,
+
+    /// Include a sublight ETA using the given speed (km/s).
+    ///
+    /// Example: `--sublight-kmps 2000` (civilian-ish baseline)
+    #[arg(long = "sublight-kmps")]
+    pub sublight_kmps: Option<f64>,
 }
