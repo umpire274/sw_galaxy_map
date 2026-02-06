@@ -414,4 +414,10 @@ pub struct RouteExplainArgs {
     /// Region blend strategy: avg | conservative | <from_weight>
     #[arg(long = "region-blend", default_value = "avg")]
     pub region_blend: String,
+
+    /// Include a sublight ETA using the given speed (km/s).
+    ///
+    /// Example: `--sublight-kmps 2000` (civilian-ish baseline)
+    #[arg(long = "sublight-kmps")]
+    pub sublight_kmps: Option<f64>,
 }
