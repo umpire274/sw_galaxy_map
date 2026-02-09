@@ -786,8 +786,12 @@ impl eframe::App for NavicomputerApp {
         self.tick_status_deadline();
 
         // Snapshot current selections so we can restore them when opening context menus
-        self.cmd_saved_sel = Self::save_selection(ctx, cmd_id);
-        self.out_saved_sel = Self::save_selection(ctx, out_id);
+        if let Some(sel) = Self::save_selection(ctx, cmd_id) {
+            self.cmd_saved_sel = Some(sel);
+        }
+        if let Some(sel) = Self::save_selection(ctx, out_id) {
+            self.out_saved_sel = Some(sel);
+        }
 
         // --- Window title
         let base = "SW Galaxy Map — Navicomputer";
