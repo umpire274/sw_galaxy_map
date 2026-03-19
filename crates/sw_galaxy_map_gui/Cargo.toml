@@ -11,6 +11,12 @@ repository.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
+include = [
+    "src/**",
+    "assets/**",
+    "Cargo.toml",
+    "README.md",
+]
 
 [dependencies]
 anyhow.workspace = true
@@ -22,3 +28,5 @@ rfd.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
+sw_galaxy_map_cli = { path = "../sw_galaxy_map_cli" }
+
