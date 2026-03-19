@@ -7,14 +7,13 @@ use crate::db::provision::{
     meta_upsert_public, rebuild_planet_search_public, rebuild_planets_fts_if_enabled,
 };
 use crate::provision::arcgis;
-use crate::ui;
 use crate::utils::normalize::normalize_text;
 
 // ----------------------------
 // Stats collection (optional)
 // ----------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChangeKind {
+pub enum ChangeKind {
     Inserted,
     Updated,
     Revived,
@@ -22,13 +21,44 @@ enum ChangeKind {
 }
 
 #[derive(Debug, Clone)]
-struct ChangeEvent {
-    fid: i64,
-    kind: ChangeKind,
-    planet: Option<String>,
+pub struct ChangeEvent {
+    pub fid: i64,
+    pub kind: ChangeKind,
+    pub planet: Option<String>,
 }
 
 #[derive(Debug, Clone)]
+pub struct UpdateSummary {
+    pub inserted: i64,
+    pub updated: i64,
+    pub revived: i64,
+    pub unchanged: i64,
+    pub marked_deleted: i64,
+    pub pruned: i64,
+    pub skipped: i64,
+    pub skipped_missing_planet: i64,
+    pub skipped_missing_x: i64,
+    pub skipped_missing_y: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateStatsReport {
+    pub top_inserted: Vec<ChangeEvent>,
+    pub top_updated: Vec<ChangeEvent>,
+    pub top_revived: Vec<ChangeEvent>,
+    pub top_marked_deleted: Vec<ChangeEvent>,
+    pub first_changed: Vec<ChangeEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DbUpdateReport {
+    pub downloaded_features: usize,
+    pub dry_run: bool,
+    pub prune: bool,
+    pub summary: UpdateSummary,
+    pub stats: Option<UpdateStatsReport>,
+}
+
 pub struct SkippedPlanetRow {
     pub fid: Option<i64>,
     pub planet: Option<String>,
@@ -227,9 +257,7 @@ pub fn run(
     dry_run: bool,
     stats: bool,
     stats_limit: usize,
-) -> Result<()> {
-    ui::info("Fetching data from remote service...");
-
+) -> Result<DbUpdateReport> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
@@ -240,18 +268,6 @@ pub fn run(
     let page_size = layer.max_record_count.min(2000);
     let features = arcgis::fetch_all_features(&client, page_size)
         .context("Failed to download features from ArcGIS")?;
-
-    ui::info(format!(
-        "Downloaded {} features. Comparing with local database...",
-        features.len()
-    ));
-
-    if dry_run {
-        ui::warning("DRY-RUN mode enabled: no changes will be written");
-        if prune {
-            ui::warning("Prune requested in dry-run: this will be reported as 'would prune'");
-        }
-    }
 
     // Start transaction: gives consistent view and allows temp tables.
     // In dry-run we will NOT commit -> changes (if any) won't persist.
@@ -465,7 +481,6 @@ pub fn run(
                 .context("Failed to count already deleted planets")?;
             already_deleted + marked_deleted
         } else {
-            ui::warning("Prune enabled: permanently removing deleted planets");
             prune_deleted(&tx)?
         }
     } else {
@@ -495,99 +510,58 @@ pub fn run(
         drop(stmt);
 
         tx.commit().context("Failed to commit db update")?;
-
-        ui::success("Update completed");
     } else {
         // No commit: transaction rolls back automatically on drop
-        ui::success("Dry-run completed (no changes written)");
     }
 
-    ui::info(format!("inserted: {}", inserted));
-    ui::info(format!("updated: {}", updated));
-    ui::info(format!("revived: {}", revived));
-    ui::info(format!("unchanged: {}", unchanged));
-    ui::info(format!("marked deleted: {}", marked_deleted));
+    let summary = UpdateSummary {
+        inserted,
+        updated,
+        revived,
+        unchanged,
+        marked_deleted,
+        pruned,
+        skipped,
+        skipped_missing_planet,
+        skipped_missing_x,
+        skipped_missing_y,
+    };
 
-    if prune {
-        if dry_run {
-            ui::info(format!("would prune: {}", pruned));
-        } else {
-            ui::info(format!("pruned: {}", pruned));
-        }
-    }
-
-    if skipped > 0 {
-        ui::warning(format!("skipped invalid rows: {}", skipped));
-        ui::info(format!("  missing Planet: {}", skipped_missing_planet));
-        ui::info(format!("  missing X: {}", skipped_missing_x));
-        ui::info(format!("  missing Y: {}", skipped_missing_y));
-    }
-
-    // ----------------------------
-    // Print --stats section
-    // ----------------------------
-    if stats {
-        fn kind_label(k: ChangeKind) -> &'static str {
-            match k {
-                ChangeKind::Inserted => "inserted",
-                ChangeKind::Updated => "updated",
-                ChangeKind::Revived => "revived",
-                ChangeKind::MarkedDeleted => "marked deleted",
-            }
-        }
-
-        println!();
-        ui::info("Stats:");
-
-        // Top N per category (sorted by FID)
-        for k in [
-            ChangeKind::Inserted,
-            ChangeKind::Updated,
-            ChangeKind::Revived,
-            ChangeKind::MarkedDeleted,
-        ] {
-            let mut v: Vec<&ChangeEvent> = events.iter().filter(|e| e.kind == k).collect();
+    let stats_report = if stats {
+        fn collect_kind(
+            events: &[ChangeEvent],
+            kind: ChangeKind,
+            stats_limit: usize,
+        ) -> Vec<ChangeEvent> {
+            let mut v: Vec<ChangeEvent> =
+                events.iter().filter(|e| e.kind == kind).cloned().collect();
             v.sort_by_key(|e| e.fid);
-
-            ui::info(format!("  Top {} {}:", stats_limit, kind_label(k)));
-            if v.is_empty() {
-                ui::info("    (none)");
-            } else {
-                for e in v.into_iter().take(stats_limit) {
-                    if let Some(p) = &e.planet {
-                        ui::info(format!("    FID={} | {}", e.fid, p));
-                    } else {
-                        ui::info(format!("    FID={}", e.fid));
-                    }
-                }
-            }
+            v.truncate(stats_limit);
+            v
         }
 
-        // First N changed FIDs overall
-        let mut changed: Vec<&ChangeEvent> = events.iter().collect();
+        let mut changed: Vec<ChangeEvent> = events.clone();
         changed.sort_by_key(|e| e.fid);
+        changed.truncate(stats_limit);
 
-        ui::info(format!("  First {} changed FIDs:", stats_limit));
-        if changed.is_empty() {
-            ui::info("    (none)");
-        } else {
-            for e in changed.into_iter().take(stats_limit) {
-                let planet = e
-                    .planet
-                    .as_ref()
-                    .map(|p| format!(" | {}", p))
-                    .unwrap_or_default();
-                ui::info(format!(
-                    "    FID={} | {}{}",
-                    e.fid,
-                    kind_label(e.kind),
-                    planet
-                ));
-            }
-        }
-    }
+        Some(UpdateStatsReport {
+            top_inserted: collect_kind(&events, ChangeKind::Inserted, stats_limit),
+            top_updated: collect_kind(&events, ChangeKind::Updated, stats_limit),
+            top_revived: collect_kind(&events, ChangeKind::Revived, stats_limit),
+            top_marked_deleted: collect_kind(&events, ChangeKind::MarkedDeleted, stats_limit),
+            first_changed: changed,
+        })
+    } else {
+        None
+    };
 
-    Ok(())
+    Ok(DbUpdateReport {
+        downloaded_features: features.len(),
+        dry_run,
+        prune,
+        summary,
+        stats: stats_report,
+    })
 }
 
 /// Returns top N missing active planets (deleted=0 and not in keep_fids), ordered by FID.

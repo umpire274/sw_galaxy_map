@@ -8,26 +8,29 @@ on:
 
 jobs:
   check:
-    name: Lint & Test
+    name: Format, Check, Clippy, Test
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - name: Install rustfmt and clippy components
-        run: |
-          rustup component add rustfmt
-          rustup component add clippy
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Format Check
         run: cargo fmt --all -- --check
 
+      - name: Cargo Check
+        run: cargo check --workspace --all-targets
+
       - name: Clippy Check
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Run Tests
-        run: cargo test --all
+        run: cargo test --workspace

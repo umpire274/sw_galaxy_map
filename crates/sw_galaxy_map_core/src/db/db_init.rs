@@ -1,37 +1,43 @@
 use crate::db::{paths, provision};
 use crate::provision::arcgis;
-use crate::ui::{error, info};
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub fn run(out: Option<String>, force: bool) -> Result<()> {
+#[derive(Debug, Clone)]
+pub struct DbInitReport {
+    pub out_path: PathBuf,
+    pub overwritten_existing: bool,
+    pub downloaded_features: usize,
+    pub fts_enabled: bool,
+}
+
+pub fn run(out: Option<String>, force: bool) -> Result<DbInitReport> {
     let out_path: PathBuf = match out {
         Some(p) => PathBuf::from(p),
         None => paths::default_db_path()?,
     };
 
     paths::ensure_parent_dir(&out_path)?;
+    let mut overwritten_existing = false;
 
     if out_path.exists() {
         if force {
             std::fs::remove_file(&out_path).with_context(|| {
                 format!("Unable to remove existing database: {}", out_path.display())
             })?;
+            overwritten_existing = true;
         } else if confirm_overwrite(&out_path)? {
             std::fs::remove_file(&out_path).with_context(|| {
                 format!("Unable to remove existing database: {}", out_path.display())
             })?;
+            overwritten_existing = true;
         } else {
-            error("Aborted. Existing database was not modified.");
-            return Ok(());
+            anyhow::bail!("Aborted. Existing database was not modified.");
         }
     }
-
-    println!("Initializing local database at: {}", out_path.display());
-    println!("Downloading data from remote service...");
 
     let client = Client::builder()
         .timeout(Duration::from_secs(60))
@@ -46,7 +52,6 @@ pub fn run(out: Option<String>, force: bool) -> Result<()> {
     };
 
     let features = arcgis::fetch_all_features(&client, page_size)?;
-    info(format!("Downloaded {} features.", features.len()));
 
     let mut con = rusqlite::Connection::open(&out_path)
         .with_context(|| format!("Unable to create SQLite database: {}", out_path.display()))?;
@@ -61,21 +66,27 @@ pub fn run(out: Option<String>, force: bool) -> Result<()> {
         importer_version: "sw_galaxy_map-0.2.0-dev".to_string(),
     };
 
-    println!("Building SQLite database...");
     provision::insert_all(&mut con, meta, &features, enable_fts)?;
 
-    println!("FTS5 enabled: {}", if enable_fts { "yes" } else { "no" });
-    println!("Done.");
-    Ok(())
+    Ok(DbInitReport {
+        out_path,
+        overwritten_existing,
+        downloaded_features: features.len(),
+        fts_enabled: enable_fts,
+    })
 }
 
 fn confirm_overwrite(path: &std::path::Path) -> Result<bool> {
-    // Prompt solo se stdin è TTY
     if !atty::is(atty::Stream::Stdin) {
         return Ok(false);
     }
 
-    eprintln!("Database already exists:\n  {}\n", path.display());
+    eprintln!(
+        "Database already exists:
+  {}
+",
+        path.display()
+    );
     eprint!("Overwrite existing database? [y/N]: ");
     io::stdout().flush()?;
 

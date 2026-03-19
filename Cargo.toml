@@ -1,43 +1,25 @@
-[package]
-name = "sw_galaxy_map"
-version = "0.8.3"
-edition = "2024"
+[workspace]
+members = [
+    "crates/sw_galaxy_map_core",
+    "crates/sw_galaxy_map_cli",
+    "crates/sw_galaxy_map_gui",
+]
+resolver = "3"
 
+[workspace.package]
+version = "0.9.0"
+edition = "2024"
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "Star Wars galaxy explorer and navicomputer with CLI and GUI interfaces, backed by a local SQLite database"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
-
 homepage = "https://github.com/umpire274/sw_galaxy_map"
 repository = "https://github.com/umpire274/sw_galaxy_map"
 documentation = "https://github.com/umpire274/sw_galaxy_map"
+keywords = ["star-wars", "navicomputer", "routing", "cli", "sqlite"]
+categories = ["command-line-utilities", "visualization", "games"]
 
-keywords = [
-    "star-wars",
-    "navicomputer",
-    "routing",
-    "cli",
-    "sqlite"
-]
-
-categories = [
-    "command-line-utilities",
-    "visualization",
-    "games"
-]
-
-# Exclude non-essential files from crates.io packages
-exclude = [
-    "/target",
-    "/res/*.sqlite",
-    "/.github",
-    "/dev_tools",
-    "*.log"
-]
-
-build = "build.rs"
-
-[dependencies]
+[workspace.dependencies]
 anyhow = "1.0.101"
 arboard = "3.6.1"
 clap = { version = "4.6.0", features = ["derive"] }
@@ -62,6 +44,3 @@ shell-words = "1.1.1"
 lto = true
 codegen-units = 1
 panic = "abort"
-
-[build-dependencies]
-winres = "0.1.12"

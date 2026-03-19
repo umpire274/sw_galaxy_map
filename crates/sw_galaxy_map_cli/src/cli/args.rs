@@ -1,29 +1,26 @@
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand};
+
+use sw_galaxy_map_core::domain::RouteListSort;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "sw_galaxy_map",
     version,
-    about = "CLI to query the Star Wars galaxy map (SQLite)",
+    about = "CLI navicomputer for exploring the Star Wars galaxy (SQLite)",
     long_about = "\
-Command-line and graphical navicomputer for exploring the Star Wars galaxy.
+Command-line navicomputer for exploring the Star Wars galaxy.
 
 Default behavior:
-  - Run without arguments to start the interactive CLI (v0.8+).
-  - Use --gui to start the graphical interface.
+  - Run without arguments to start the interactive CLI.
   - Use subcommands for one-shot CLI operations.
+
+GUI startup is handled by the separate `sw_galaxy_map_gui` crate.
 "
 )]
 pub struct Cli {
     /// Path to the SQLite database
     #[arg(long)]
     pub db: Option<String>,
-
-    /// Launch the command line interface (CLI)
-    ///
-    /// Note: This flag is intended to be used without subcommands.
-    #[arg(long, action = ArgAction::SetTrue)]
-    pub cli: bool,
 
     #[command(subcommand)]
     pub cmd: Option<Commands>,
@@ -261,13 +258,6 @@ pub enum WaypointCmd {
         #[arg(long)]
         include_linked: bool,
     },
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-pub enum RouteListSort {
-    Updated,
-    Id,
-    Length,
 }
 
 #[derive(Subcommand, Debug)]

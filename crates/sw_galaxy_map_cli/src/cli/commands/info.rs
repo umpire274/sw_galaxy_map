@@ -1,8 +1,8 @@
-use crate::db::queries::{find_planet_for_info, get_aliases};
 use crate::ui::info;
-use crate::utils::normalize::normalize_text;
 use anyhow::Result;
 use rusqlite::Connection;
+use sw_galaxy_map_core::db::queries::{find_planet_for_info, get_aliases};
+use sw_galaxy_map_core::utils::normalize_text;
 
 const LABEL_W: usize = 24;
 

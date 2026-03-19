@@ -1,11 +1,14 @@
-// src/gui/mod.rs
 mod app;
 
 use anyhow::Result;
 
+/// Run the native egui application.
 pub fn run() -> Result<()> {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../res/sw_galaxy_map_256.png"))
-        .expect("Failed to load icon");
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../res/sw_galaxy_map_256.png"
+    )))
+    .expect("Failed to load icon");
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -15,9 +18,6 @@ pub fn run() -> Result<()> {
         ..Default::default()
     };
 
-    // `eframe::run_native` restituisce un `Result<_, eframe::Error>` che non è convertibile
-    // in `anyhow::Error` (non è `Send + Sync`), quindi non usiamo `?` qui.
-    // Inoltre la factory deve restituire direttamente `Box<dyn eframe::App>`.
     if let Err(err) = eframe::run_native(
         "SW Galaxy Map — Navicomputer",
         native_options,

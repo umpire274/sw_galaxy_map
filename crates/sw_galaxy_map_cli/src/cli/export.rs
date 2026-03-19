@@ -1,5 +1,5 @@
-use crate::model::RouteOptionsJson;
 use serde::Serialize;
+use sw_galaxy_map_core::model::RouteOptionsJson;
 
 #[derive(Debug, Serialize)]
 pub struct ExplainExport {
