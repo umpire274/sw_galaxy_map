@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-03-19
+
+### Fixed
+
+- made the GUI more robust when the CLI sibling executable is not available
+- restored the historical CLI binary name `sw_galaxy_map` to avoid breaking existing scripts
+- vendored the GUI icon inside the `sw_galaxy_map_gui` crate so packaging and `cargo package` work correctly
+- added a CLI library entry point for GUI help integration
+- improved GUI command/help fallback behavior after the workspace split
+
+### Changed
+
+- refined post-`0.9.0` workspace split integration between `sw_galaxy_map_cli` and `sw_galaxy_map_gui`
+- updated packaging layout to keep GUI assets self-contained inside the GUI crate
+
 ---
 
 ## [0.9.0] - Unreleased
@@ -12,9 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Project reorganized as a Cargo workspace with three crates:
-  - `sw_galaxy_map_core`
-  - `sw_galaxy_map_cli`
-  - `sw_galaxy_map_gui`
+    - `sw_galaxy_map_core`
+    - `sw_galaxy_map_cli`
+    - `sw_galaxy_map_gui`
 - `cargo run -p sw_galaxy_map_cli` now always starts only the CLI.
 - `cargo run -p sw_galaxy_map_gui` now always starts only the GUI.
 - Removed the legacy startup discriminant used to switch from CLI to GUI automatically.

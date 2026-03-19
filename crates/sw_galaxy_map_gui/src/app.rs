@@ -2,7 +2,8 @@
 //
 // 0.7.2: GUI "console" mode + HELP popup
 // - A single command box accepts the same CLI commands (e.g. `route compute ...`).
-// - Commands are executed by spawning the sibling CLI executable with arguments.
+// - Commands are executed by spawning the sibling CLI executable when available.
+// - In a source workspace, the GUI can fall back to `cargo run -p sw_galaxy_map_cli -- ...`.
 // - stdout/stderr are captured and appended to the GUI output panel.
 // - JSON output is auto-detected and can be exported via the existing Export JSON button.
 // - NEW: Help popup that runs `--help`, `route --help`, etc. and renders output in a scrollable window.
@@ -427,9 +428,9 @@ impl NavicomputerApp {
         };
 
         #[cfg(target_os = "windows")]
-        let candidate_names = ["sw_galaxy_map_cli.exe", "sw_galaxy_map.exe"];
+        let candidate_names = ["sw_galaxy_map.exe", "sw_galaxy_map_cli.exe"];
         #[cfg(not(target_os = "windows"))]
-        let candidate_names = ["sw_galaxy_map_cli", "sw_galaxy_map"];
+        let candidate_names = ["sw_galaxy_map", "sw_galaxy_map_cli"];
 
         for name in candidate_names {
             let candidate = dir.join(name);
@@ -439,16 +440,29 @@ impl NavicomputerApp {
         }
 
         Err(format!(
-            "Failed to locate the CLI executable next to {:?}. Set SW_GALAXY_MAP_CLI_EXE to override.",
+            "Failed to locate the CLI executable next to {:?}. Set SW_GALAXY_MAP_CLI_EXE to override or run from the workspace root for cargo fallback.",
             current
         ))
     }
 
-    fn run_exe_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
-        let exe = Self::cli_executable()?;
-        let res = Command::new(exe).args(argv).output();
+    fn workspace_root_from_manifest_dir() -> Option<PathBuf> {
+        let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        while dir.pop() {
+            if dir.join("Cargo.toml").is_file()
+                && dir
+                    .join("crates")
+                    .join("sw_galaxy_map_cli")
+                    .join("Cargo.toml")
+                    .is_file()
+            {
+                return Some(dir);
+            }
+        }
+        None
+    }
 
-        match res {
+    fn run_command_capture(cmd: &mut Command) -> Result<(String, String, i32), String> {
+        match cmd.output() {
             Ok(r) => {
                 let out = String::from_utf8_lossy(&r.stdout).to_string();
                 let err = String::from_utf8_lossy(&r.stderr).to_string();
@@ -457,6 +471,31 @@ impl NavicomputerApp {
             }
             Err(e) => Err(format!("Failed to execute command: {e}")),
         }
+    }
+
+    fn run_cargo_cli_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
+        let root = Self::workspace_root_from_manifest_dir()
+            .ok_or_else(|| "Workspace root not found for cargo fallback.".to_string())?;
+
+        let mut cmd = Command::new("cargo");
+        cmd.current_dir(root)
+            .arg("run")
+            .arg("-q")
+            .arg("-p")
+            .arg("sw_galaxy_map_cli")
+            .arg("--");
+        cmd.args(argv);
+        Self::run_command_capture(&mut cmd)
+    }
+
+    fn run_exe_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
+        if let Ok(exe) = Self::cli_executable() {
+            let mut cmd = Command::new(exe);
+            cmd.args(argv);
+            return Self::run_command_capture(&mut cmd);
+        }
+
+        self.run_cargo_cli_capture(argv)
     }
 
     fn append_non_empty(buf: &mut String, s: &str) {

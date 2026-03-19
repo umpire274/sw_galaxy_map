@@ -6,7 +6,7 @@ use anyhow::Result;
 pub fn run() -> Result<()> {
     let icon = eframe::icon_data::from_png_bytes(include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../res/sw_galaxy_map_256.png"
+        "/assets/sw_galaxy_map_256.png"
     )))
     .expect("Failed to load icon");
 
