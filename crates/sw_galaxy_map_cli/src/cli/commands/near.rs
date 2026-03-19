@@ -1,10 +1,10 @@
-use crate::db::queries::{
-    find_planet_for_info, get_unknown_planet_by_fid, near_planets, near_planets_excluding_fid,
-};
 use crate::ui::{info, warning};
-use crate::utils::normalize::normalize_text;
 use anyhow::Result;
 use rusqlite::Connection;
+use sw_galaxy_map_core::db::queries::{
+    find_planet_for_info, get_unknown_planet_by_fid, near_planets, near_planets_excluding_fid,
+};
+use sw_galaxy_map_core::utils::normalize_text;
 
 fn col_width<T: AsRef<str>>(items: &[T], min: usize) -> usize {
     items

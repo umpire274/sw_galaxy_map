@@ -2,7 +2,7 @@
 //
 // 0.7.2: GUI "console" mode + HELP popup
 // - A single command box accepts the same CLI commands (e.g. `route compute ...`).
-// - Commands are executed by spawning the current executable with arguments.
+// - Commands are executed by spawning the sibling CLI executable with arguments.
 // - stdout/stderr are captured and appended to the GUI output panel.
 // - JSON output is auto-detected and can be exported via the existing Export JSON button.
 // - NEW: Help popup that runs `--help`, `route --help`, etc. and renders output in a scrollable window.
@@ -99,7 +99,7 @@ pub struct NavicomputerApp {
 
 impl NavicomputerApp {
     fn prevalidate_cli_tokens(tokens: &[String]) -> anyhow::Result<()> {
-        use crate::cli::validate;
+        use sw_galaxy_map_core::validate;
 
         if tokens.is_empty() {
             anyhow::bail!("No command provided.");
@@ -286,13 +286,13 @@ impl NavicomputerApp {
 
     fn probe_db() -> (bool, String) {
         // Best-effort DB probe, without doing provisioning.
-        match crate::db::db_status::resolve_db_path(None) {
+        match sw_galaxy_map_core::db::db_status::resolve_db_path(None) {
             Ok(path) => {
                 if !path.exists() {
                     return (false, format!("SQLite: not found\n{}", path.display()));
                 }
 
-                match crate::db::core::open_db(&path.to_string_lossy()) {
+                match sw_galaxy_map_core::db::core::open_db(&path.to_string_lossy()) {
                     Ok(_) => (true, format!("SQLite: connected\n{}", path.display())),
                     Err(e) => (false, format!("SQLite: error\n{}\n{:#}", path.display(), e)),
                 }
@@ -412,12 +412,40 @@ impl NavicomputerApp {
         }
     }
 
-    fn current_exe() -> Result<PathBuf, String> {
-        std::env::current_exe().map_err(|e| format!("Failed to locate executable: {e}"))
+    fn cli_executable() -> Result<PathBuf, String> {
+        if let Ok(explicit) = std::env::var("SW_GALAXY_MAP_CLI_EXE") {
+            let path = PathBuf::from(explicit);
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+
+        let current =
+            std::env::current_exe().map_err(|e| format!("Failed to locate GUI executable: {e}"))?;
+        let Some(dir) = current.parent() else {
+            return Err("Failed to resolve executable directory.".to_string());
+        };
+
+        #[cfg(target_os = "windows")]
+        let candidate_names = ["sw_galaxy_map_cli.exe", "sw_galaxy_map.exe"];
+        #[cfg(not(target_os = "windows"))]
+        let candidate_names = ["sw_galaxy_map_cli", "sw_galaxy_map"];
+
+        for name in candidate_names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        Err(format!(
+            "Failed to locate the CLI executable next to {:?}. Set SW_GALAXY_MAP_CLI_EXE to override.",
+            current
+        ))
     }
 
     fn run_exe_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
-        let exe = Self::current_exe()?;
+        let exe = Self::cli_executable()?;
         let res = Command::new(exe).args(argv).output();
 
         match res {
@@ -1038,9 +1066,7 @@ impl eframe::App for NavicomputerApp {
                                     .monospace()
                                     .color(ui.visuals().weak_text_color()),
                             )
-                            .on_hover_text(
-                                "sw_galaxy_map — Star Wars galaxy navicomputer (GUI + CLI)",
-                            );
+                            .on_hover_text("sw_galaxy_map_gui — Star Wars galaxy navicomputer GUI");
 
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),

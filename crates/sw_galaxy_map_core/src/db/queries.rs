@@ -1263,7 +1263,7 @@ pub fn list_routes(
     from: Option<i64>,
     to: Option<i64>,
     wp: Option<usize>,
-    sort: crate::cli::args::RouteListSort,
+    sort: crate::domain::RouteListSort,
 ) -> Result<(Vec<RouteListRow>, usize)> {
     use rusqlite::types::Value;
 
@@ -1285,11 +1285,11 @@ pub fn list_routes(
     }
 
     let order_sql = match sort {
-        crate::cli::args::RouteListSort::Updated => {
+        crate::domain::RouteListSort::Updated => {
             "ORDER BY COALESCE(r.updated_at, r.created_at) DESC, r.id DESC"
         }
-        crate::cli::args::RouteListSort::Id => "ORDER BY r.id DESC",
-        crate::cli::args::RouteListSort::Length => {
+        crate::domain::RouteListSort::Id => "ORDER BY r.id DESC",
+        crate::domain::RouteListSort::Length => {
             "ORDER BY (r.length IS NULL) ASC, r.length ASC, r.id DESC"
         }
     };

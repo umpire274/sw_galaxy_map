@@ -1,6 +1,21 @@
-use crate::ui;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
+
+#[derive(Debug, Clone)]
+pub struct AppliedMigrationStep {
+    pub from: i64,
+    pub to: i64,
+    pub label: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct MigrationReport {
+    pub current_version: i64,
+    pub target_version: i64,
+    pub dry_run: bool,
+    pub noop: bool,
+    pub applied: Vec<AppliedMigrationStep>,
+}
 
 const START_SCHEMA_VERSION: i64 = 3;
 const LATEST_SCHEMA_VERSION: i64 = 11;
@@ -390,37 +405,34 @@ fn m_to_v11(tx: &Transaction<'_>) -> Result<()> {
 
 /// Run schema migrations up to SCHEMA_VERSION.
 /// Idempotent and safe to call on every startup/open.
-pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
+pub fn run(con: &mut Connection, dry_run: bool, _emit_noop: bool) -> Result<MigrationReport> {
     con.query_row("SELECT 1 FROM meta LIMIT 1", [], |r| r.get::<_, i32>(0))
         .context("Database schema is missing required table: meta")?;
 
     let current = meta_get_i64(con, "schema_version")?.unwrap_or(0);
-
-    if current >= LATEST_SCHEMA_VERSION {
-        if emit_noop {
-            ui::info(format!("Database schema already up-to-date (v{})", current));
-        }
-        return Ok(());
-    }
-
-    ui::info(format!(
-        "Database schema upgrade required (current: v{}, target: v{})",
-        current, LATEST_SCHEMA_VERSION
-    ));
-
-    let tx = con
-        .transaction()
-        .context("Failed to start migration transaction")?;
-
     let steps = migration_steps();
     let latest = steps
         .iter()
         .map(|s| s.to)
         .max()
         .unwrap_or(START_SCHEMA_VERSION);
-    let mut cur = current.max(START_SCHEMA_VERSION);
 
-    let mut applied = 0usize;
+    if current >= LATEST_SCHEMA_VERSION {
+        return Ok(MigrationReport {
+            current_version: current,
+            target_version: latest,
+            dry_run,
+            noop: true,
+            applied: Vec::new(),
+        });
+    }
+
+    let tx = con
+        .transaction()
+        .context("Failed to start migration transaction")?;
+
+    let mut cur = current.max(START_SCHEMA_VERSION);
+    let mut applied = Vec::new();
 
     while cur < latest {
         let next = cur + 1;
@@ -438,36 +450,28 @@ pub fn run(con: &mut Connection, dry_run: bool, emit_noop: bool) -> Result<()> {
             );
         };
 
-        ui::info(format!(
-            "Applying migration: v{} → v{} ({})",
-            step.from, step.to, step.label
-        ));
-
-        if dry_run {
-            ui::warning("DRY-RUN: no changes will be applied");
-        } else {
+        if !dry_run {
             (step.apply)(&tx)?;
             set_schema_version(&tx, step.to)?;
         }
 
-        ui::success(format!("Migration v{} → v{} completed", step.from, step.to));
-
-        applied += 1;
+        applied.push(AppliedMigrationStep {
+            from: step.from,
+            to: step.to,
+            label: step.label,
+        });
         cur = step.to;
     }
 
-    if dry_run {
-        ui::info(format!(
-            "Dry-run completed: {applied} migration(s) would be applied."
-        ));
-        // niente commit
-        return Ok(());
+    if !dry_run {
+        tx.commit().context("Failed to commit migration")?;
     }
 
-    tx.commit().context("Failed to commit migration")?;
-    ui::info(format!(
-        "Database schema successfully updated (applied {applied} migration(s))."
-    ));
-
-    Ok(())
+    Ok(MigrationReport {
+        current_version: current,
+        target_version: latest,
+        dry_run,
+        noop: false,
+        applied,
+    })
 }

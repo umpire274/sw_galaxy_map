@@ -5,26 +5,28 @@ use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
-use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteExplainArgs, RouteListSort};
+use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteExplainArgs};
 use crate::cli::color::Colors;
 use crate::cli::export::{
     ExplainClosest, ExplainDetour, ExplainDominantPenalty, ExplainEndpoint, ExplainExport,
     ExplainNote, ExplainObstacle, ExplainRouteMeta, ExplainScore, ExplainWaypoint,
 };
-use crate::db::queries;
-use crate::model::Planet;
-use crate::model::RouteOptionsJson;
-use crate::routing::collision::Obstacle;
-use crate::routing::geometry::Point;
-use crate::routing::geometry::{dist as geom_dist, polyline_length_waypoints_parsec};
-use crate::routing::hyperspace::{
+use sw_galaxy_map_core::db::queries;
+use sw_galaxy_map_core::domain::RouteListSort;
+use sw_galaxy_map_core::model::Planet;
+use sw_galaxy_map_core::model::RouteLoaded;
+use sw_galaxy_map_core::model::RouteOptionsJson;
+use sw_galaxy_map_core::routing::collision::Obstacle;
+use sw_galaxy_map_core::routing::geometry::Point;
+use sw_galaxy_map_core::routing::geometry::{dist as geom_dist, polyline_length_waypoints_parsec};
+use sw_galaxy_map_core::routing::hyperspace::{
     DetourPenaltyParams, GalacticRegion, detour_penalty_multiplier, estimate_travel_time_hours,
     extract_galactic_region,
 };
-use crate::routing::route_debug::debug_print_route;
-use crate::routing::router::{RouteOptions, compute_route};
-use crate::routing::sublight::estimate_sublight_time_hours;
-use crate::utils::normalize::normalize_text;
+use sw_galaxy_map_core::routing::route_debug::debug_print_route;
+use sw_galaxy_map_core::routing::router::{RouteOptions, compute_route};
+use sw_galaxy_map_core::routing::sublight::estimate_sublight_time_hours;
+use sw_galaxy_map_core::utils::normalize_text;
 
 use crate::ui::Style;
 
@@ -150,7 +152,7 @@ fn run_compute(con: &mut Connection, args: &RouteComputeArgs) -> Result<()> {
 struct ComputedLeg {
     from_p: Planet,
     to_p: Planet,
-    route: crate::routing::router::Route,
+    route: sw_galaxy_map_core::routing::router::Route,
     route_id: i64,
 }
 
@@ -406,7 +408,7 @@ fn run_show(con: &Connection, route_id: i64) -> Result<()> {
 }
 
 fn analyze_detour_drivers(
-    d: &crate::model::RouteDetourRow,
+    d: &sw_galaxy_map_core::model::RouteDetourRow,
     opts: Option<&RouteOptionsJson>,
 ) -> Vec<String> {
     let mut out = Vec::new();
@@ -529,7 +531,7 @@ fn format_duration_compact(hours: f64) -> String {
 
 fn compute_eta_summary(
     con: &Connection,
-    loaded: &queries::RouteLoaded,
+    loaded: &RouteLoaded,
     hyperdrive_class: f64,
     blend: RegionBlend,
     detour_count_base: f64, // e.g. 0.97
@@ -959,7 +961,7 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
 }
 
 fn run_last(con: &Connection, from: &str, to: &str) -> Result<()> {
-    use crate::utils::normalize::normalize_text;
+    use sw_galaxy_map_core::utils::normalize_text;
 
     let from_norm = normalize_text(from);
     let to_norm = normalize_text(to);
@@ -1082,9 +1084,9 @@ fn run_prune(con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-use crate::cli::validate;
-use crate::utils::formatting::truncate_ellipsis;
 use serde::Serialize;
+use sw_galaxy_map_core::utils::formatting::truncate_ellipsis;
+use sw_galaxy_map_core::validate;
 
 #[derive(Debug, Serialize)]
 struct RouteListExport {

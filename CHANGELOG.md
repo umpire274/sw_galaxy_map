@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.0] - Unreleased
+
+### Changed
+
+- Project reorganized as a Cargo workspace with three crates:
+  - `sw_galaxy_map_core`
+  - `sw_galaxy_map_cli`
+  - `sw_galaxy_map_gui`
+- `cargo run -p sw_galaxy_map_cli` now always starts only the CLI.
+- `cargo run -p sw_galaxy_map_gui` now always starts only the GUI.
+- Removed the legacy startup discriminant used to switch from CLI to GUI automatically.
+- Updated workspace migration notes and README to document the explicit CLI/GUI entrypoints.
+
+---
+
 ## v0.8.2 — 2026-02-06
 
 ### Added

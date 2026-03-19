@@ -1,11 +1,11 @@
 use crate::cli::args::WaypointCmd;
 use crate::cli::color::Colors;
-use crate::db::queries;
-use crate::model::Planet;
 use crate::ui;
 use crate::ui::Style;
-use crate::utils::formatting::truncate_ellipsis;
-use crate::utils::normalize::normalize_text;
+use sw_galaxy_map_core::db::queries;
+use sw_galaxy_map_core::model::Planet;
+use sw_galaxy_map_core::utils::formatting::truncate_ellipsis;
+use sw_galaxy_map_core::utils::normalize_text;
 
 use anyhow::{Result, bail};
 use rusqlite::Connection;
@@ -266,7 +266,7 @@ fn run_show(con: &Connection, key: &String) -> Result<()> {
         ),
     ];
 
-    crate::utils::formatting::print_kv_block_colored_keys(&pairs, |s| c.dim(s));
+    sw_galaxy_map_core::utils::formatting::print_kv_block_colored_keys(&pairs, |s| c.dim(s));
     Ok(())
 }
 

@@ -1,362 +1,338 @@
 # sw_galaxy_map
 
-**sw_galaxy_map** is a command-line application written in Rust that allows querying
-and exploring the Star Wars galaxy using a local SQLite database.
+[![CI](https://img.shields.io/github/actions/workflow/status/umpire274/sw_galaxy_map/rust.yml?branch=main\&label=CI)](https://github.com/umpire274/sw_galaxy_map/actions/workflows/rust.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE-MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE-APACHE)
+[![Rust](https://img.shields.io/badge/Rust-Edition%202024-orange)](./Cargo.toml)
+[![Workspace](https://img.shields.io/badge/Cargo-Workspace-informational)](./Cargo.toml)
+[![Status](https://img.shields.io/badge/status-0.9.0%20migration-success)](./CHANGELOG.md)
 
-The application provides tools to:
+**sw_galaxy_map** is an offline Star Wars galaxy explorer written in Rust.
 
-- search for planets by name or alias,
-- display all available information about a specific planet,
-- find nearby planets within a given radius using Euclidean distance
-  on X/Y coordinates expressed in parsecs.
+It provides a local SQLite-backed navigation and lookup system for planets, aliases, routes, and computed detour waypoints across a 2D galactic map expressed in parsecs. The project is intended for educational and non-commercial use.
 
-The project is designed as an offline, fast, and script-friendly CLI tool,
-intended primarily for educational and non-commercial use.
-
----
-
-## Acknowledgements
-
-The planetary data used by this project were obtained from the **Star Wars Galaxy Map**
-available at:
-
-[Star Wars Galaxy Map](http://www.swgalaxymap.com/): Explore the Galaxy Far, Far Away
-
-The Star Wars Galaxy Map project is created and maintained by **Henry Bernberg**.
-All credit for the original dataset, research, and compilation goes to him.
-
-If you find this data valuable, please consider supporting the original author via one
-of the official donation channels:
-
-- [Ko-fi](https://ko-fi.com/J3J0197XZ)
-- [PayPal](https://www.paypal.com/donate?token=rk-LV-u5miGM2sumnvRL5ZiAFjnwIhhLnsSe-mqEnFgDAmeIhBkG6CQamxUxUoR18iwI0mA8h5ruuIk_)
-
-This project uses the data for **educational and non-commercial purposes** only and
-is not affiliated with, endorsed by, or associated with the Star Wars Galaxy Map
-website, Lucasfilm, or The Walt Disney Company.
+Starting with **0.9.0**, the codebase is organized as a **Cargo workspace** with dedicated crates for shared logic, the command-line interface, and the graphical interface. This separation makes the project easier to evolve, test, and maintain. The current README already reflects that three-crate workspace split and explicit frontend launch behavior, which this rewritten version preserves and expands. fileciteturn4file0L1-L31
 
 ---
 
-## 🧭 Route computation & detour waypoints
+## Features
 
-The routing engine computes hyperspace routes between two planets using a 2D galactic map (X/Y coordinates in parsecs).
-The ideal route is a straight line between the origin and the destination; however, planets generate **hyperspace no-fly
-zones** that cannot be crossed.
-
-When a route intersects one or more of these zones, the engine dynamically inserts **detour waypoints** to safely bypass
-the obstacle.
-
-### 🌌 Planet obstacles model
-
-- Each planet is treated as a **circular obstacle** in the galactic plane.
-- The obstacle radius is defined by the `--safety` parameter and represents:
-    - gravitational mass shadows
-    - hyperspace shear
-    - interdiction fields
-    - standard astrogation safety margins
-
-- This radius is **not** the physical size of the planet.
-
-### 🔍 Collision detection
-
-For each segment of the current route polyline:
-
-1. The engine computes the **closest point on the segment** to every nearby planet.
-2. If this distance is less than the planet’s safety radius, the segment is considered in **hard collision**.
-3. The first collision along the route (lowest parametric `t`) is resolved before any others.
-
-### 🧩 Detour candidate generation
-
-When a collision is detected on a segment **A** → **B**, the engine generates a set of candidate detour waypoints around
-the collision point **Q**.
-Candidates are placed using different directions to ensure robustness in dense regions:
-
-- **Radial** (**away from planet center**)
-  Strongly preferred: pushes the route directly outside the no-fly zone.
-
-- **Lateral** (**left/right of the segment**)
-  Classic bypass around the obstacle.
-
-- **Forward** / **backward** (**along the route direction**)
-  Useful in clustered systems.
-
-- Diagonal directions
-  Improve chances of escaping complex obstacle layouts.
-
-The distance of each candidate from the collision point is:
-
-```ini
-offset = obstacle_radius + clearance
-```
-
-If no valid candidate is found, the offset is progressively increased using:
-
-```ini
-offset *= offset_growth
-```
-
-This process is repeated up to `max_offset_tries`.
-
-### ⚖️ Candidate evaluation & scoring
-
-Each candidate waypoint **W** is evaluated by splitting the segment into:
-
-- **A** → **W**
-- **W** → **B**
-
-Both segments must be collision-free.
-
-Valid candidates are scored using a weighted cost function:
-
-1. **Base length**
-
-Total path length increase:
-
-```ini
-base = |A→W| + |W→B|
-```
-
-2. **Turn penalty**
-
-Penalizes sharp angles (zig-zag routes):
-
-```ini
-turn = turn_weight × (1 − cosθ)
-```
-
-3. **Backtracking penalty**
-
-Penalizes detours that move backward relative to the overall direction:
-
-```ini
-back = back_weight × max(0, −dot(dir(A→B), dir(A→W)))
-```
-
-4. **Proximity penalty**
-
-Soft penalty for passing close to other planets (even without collision):
-
-- Applies within a configurable warning band:
-  ```ini
-    warning_radius = obstacle_radius + proximity_margin
-  ```
-
-- Grows quadratically as the route approaches the obstacle.
-
-**Total score**
-
-```ini
-total = base + turn + back + proximity
-```
-
-The candidate with the **lowest total score** is selected.
-
-### 🧠 Iterative routing
-
-- The chosen waypoint is inserted into the route.
-- The process restarts from the beginning of the polyline.
-- The algorithm stops when:
-    - no collisions remain, or
-    - max_iters is reached.
-
-Each detour decision (collision, chosen waypoint, score breakdown) is recorded and can be:
-
-- printed in debug output
-- visualized
-- persisted to the database
-
-### ✨ Result
-
-The final route consists of:
-
-- a polyline of waypoints (start, detours, destination)
-- total route length
-- a chronological list of detour decisions explaining why each waypoint exists
-
-This approach produces routes that are:
-
-- safe
-- explainable
-- stable
-- suitable for both CLI usage and future visualization layers
+* Search planets by name or alias
+* Display detailed information for a single planet
+* Find nearby planets within a configurable radius
+* Compute hyperspace routes between planets
+* Automatically generate safe detour waypoints around planetary no-fly zones
+* Persist routes, route polylines, detour decisions, and reusable computed waypoints in SQLite
+* Use the project entirely offline once the local database is available
+* Choose between a **CLI frontend** and a **GUI frontend**
 
 ---
 
-## 🗄️ Persistence model (SQLite DB design)
+## Workspace layout
 
-The project persists computed routes and generated detour waypoints in the local SQLite database to support:
+Starting with the `0.9.0` migration, the project is structured as a Cargo workspace with three crates: `sw_galaxy_map_core` for shared logic and persistence, `sw_galaxy_map_cli` for the command-line interface and interactive shell, and `sw_galaxy_map_gui` for the egui/eframe graphical interface. fileciteturn4file0L14-L31
 
-- caching (avoid recomputing the same route repeatedly)
-- inspection/debugging (`route show`, `route last`)
-- future visualization (map rendering, route replay, analytics)
-- building a growing catalog of navigation waypoints
+```text
+sw_galaxy_map/
+├── Cargo.toml
+├── README.md
+├── LICENSE-MIT
+├── LICENSE-APACHE
+├── crates/
+│   ├── sw_galaxy_map_core/
+│   ├── sw_galaxy_map_cli/
+│   └── sw_galaxy_map_gui/
+└── .github/
+    └── workflows/
+```
 
-Routes and waypoints are persisted using the following tables.
+### Crates
 
-### 📍 waypoints
+#### `sw_galaxy_map_core`
 
-Global waypoint catalog. It contains both:
+Shared domain logic:
 
-- **manual waypoints** (user-defined: junctions, buoys, etc.)
-- **computed waypoints** (generated by the router when bypassing obstacles)
+* SQLite access and migrations
+* data models
+* routing engine
+* detour generation
+* route persistence
+* validation helpers
+* common utilities
 
-Each waypoint is a point in the galactic plane:
+#### `sw_galaxy_map_cli`
 
-| Column        | Type       | Notes                                           |
-|---------------|------------|-------------------------------------------------|
-| `id`          | INTEGER PK | Waypoint identifier                             |
-| `name`        | TEXT       | Human-friendly name                             |
-| `name_norm`   | TEXT       | Normalized name (unique lookup key)             |
-| `x`, `y`      | REAL       | Coordinates in parsecs                          |
-| `kind`        | TEXT       | e.g. `manual`, `junction`, `computed`           |
-| `fingerprint` | TEXT NULL  | **Only for computed** waypoints; used for dedup |
-| `note`        | TEXT NULL  | Optional free text                              |
-| `created_at`  | TEXT       | UTC timestamp                                   |
-| `updated_at`  | TEXT NULL  | UTC timestamp                                   |
+Terminal frontend:
 
-**Computed waypoint deduplication** (`fingerprint`)
-Computed waypoints may be generated multiple times across different routes or parameter sets.
-To avoid inserting duplicates, computed waypoints use a stable **fingerprint** (hash/string) that represents the
-generated
-waypoint identity (e.g. geometry + obstacle context + offset model).
+* subcommands
+* interactive shell
+* terminal rendering
+* export helpers
+* script-friendly workflows
 
-When persisting computed waypoints the engine performs an **upsert** keyed by `fingerprint`:
+#### `sw_galaxy_map_gui`
 
-- if a waypoint with the same fingerprint exists → reuse it
-- otherwise → insert a new computed waypoint
+Graphical frontend:
 
-This yields a growing, reusable navigation catalog over time.
+* egui/eframe application
+* graphical command launcher
+* route and planet exploration UI
+* integration with the CLI sibling executable where needed
 
-### 🪐 waypoint_planets
+---
 
-Associates a waypoint with one or more nearby/related planets.
+## Running the project
 
-This is useful for:
+### Run the CLI
 
-- “anchor” planets for a waypoint (e.g. “near Corellia”)
-- computed waypoints generated while bypassing specific obstacles
-- future UI/visualization (grouping waypoints around systems)
+```bash
+cargo run -p sw_galaxy_map_cli
+```
 
-| Column        | Type                        | Notes                             |
-|---------------|-----------------------------|-----------------------------------|
-| `id`          | INTEGER PK                  | Link identifier                   |
-| `waypoint_id` | INTEGER FK → `waypoints.id` | Waypoint                          |
-| `planet_fid`  | INTEGER FK → `planets.FID`  | Planet                            |
-| `role`        | TEXT                        | e.g. `anchor`, `near`, `obstacle` |
-| `distance`    | REAL NULL                   | Optional distance (parsecs)       |
-| `created_at`  | TEXT                        | UTC timestamp                     |
+This starts **only** the CLI frontend.
 
-A waypoint can be linked to multiple planets, and a planet can have multiple related waypoints.
+* If you pass a subcommand, it runs a one-shot command.
+* If you launch it without subcommands, it starts the interactive shell.
 
-### 🧭 routes
+Examples:
 
-Routes are persisted as “cache entries” between a pair of planets.
+```bash
+cargo run -p sw_galaxy_map_cli -- search tatooine
+cargo run -p sw_galaxy_map_cli -- info coruscant
+cargo run -p sw_galaxy_map_cli -- near alderaan --radius 25
+```
 
-**Important design rule**: routes are **unique per origin/destination** pair.
+### Run the GUI
 
-This ensures that:
+```bash
+cargo run -p sw_galaxy_map_gui
+```
 
-- running the same route again with different parameters updates the record
-- the database does not accumulate duplicates for the same FROM → TO
-- `route last <from> <to>` is well-defined
+This starts **only** the GUI frontend.
 
-| Column            | Type                       | Notes                                                          |
-|-------------------|----------------------------|----------------------------------------------------------------|
-| `id`              | INTEGER PK                 | Route identifier                                               |
-| `from_planet_fid` | INTEGER FK → `planets.FID` | Origin                                                         |
-| `to_planet_fid`   | INTEGER FK → `planets.FID` | Destination                                                    |
-| `algo_version`    | TEXT                       | Router version string (e.g. `router_v1`)                       |
-| `options_json`    | TEXT                       | Serialized options used (`safety`, `clearance`, weights, etc.) |
-| `length`          | REAL NULL                  | Total route length (parsecs)                                   |
-| `iterations`      | INTEGER NULL               | Router iterations                                              |
-| `status`          | TEXT                       | `ok` / `error`                                                 |
-| `error`           | TEXT NULL                  | Error details if status=`error`                                |
-| `created_at`      | TEXT                       | UTC timestamp                                                  |
-| `updated_at`      | TEXT NULL                  | UTC timestamp                                                  |
+The two frontends are intentionally separated:
 
-Uniqueness is enforced by a unique index:
+* `cargo run -p sw_galaxy_map_cli` launches only the CLI
+* `cargo run -p sw_galaxy_map_gui` launches only the GUI
 
-- `(from_planet_fid, to_planet_fid)` is unique
+That explicit split is already part of the current project direction and should remain the expected behavior for `0.9.0`. fileciteturn4file0L20-L31
 
-**Upsert semantics**
+---
 
-Recomputing a route performs an **UPSERT**:
+## Development commands
 
-- update route metadata (`options_json`, `length`, etc.)
-- update `updated_at`
-- replace route polyline and detour details (see below)
+### Format
 
-### 🧷 route_waypoints
+```bash
+cargo fmt --all
+```
 
-Stores the final polyline (ordered list of points) for a route.
+### Check
 
-Each row represents one waypoint in the route, identified by its sequence index (`seq`).
+```bash
+cargo check --workspace --all-targets
+```
 
-Waypoints may refer to entries in the global waypoint catalog (`waypoints.id`) or may be “raw” coordinates.
+### Clippy
 
-| Column        | Type                             | Notes                          |
-|---------------|----------------------------------|--------------------------------|
-| `id`          | INTEGER PK                       | Row identifier                 |
-| `route_id`    | INTEGER FK → `routes.id`         | Route                          |
-| `seq`         | INTEGER                          | Order in the polyline (0..N-1) |
-| `x`, `y`      | REAL                             | Waypoint coordinates           |
-| `waypoint_id` | INTEGER NULL FK → `waypoints.id` | Optional link to catalog       |
-| `kind`        | TEXT                             | e.g. `start`, `detour`, `end`  |
-| `created_at`  | TEXT                             | UTC timestamp                  |
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
 
-**Replace strategy**
-On route recomputation, the engine removes and reinserts the polyline:
+### Test
 
-- `DELETE FROM route_waypoints WHERE route_id = ?`
-- insert the new ordered polyline
+```bash
+cargo test --workspace
+```
 
-This keeps the stored route consistent with the latest `options_json`.
+### Full local validation sequence
 
-### 🧠 route_detours
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+```
 
-Stores detailed decisions made by the router while building the route.
+---
 
-Detours are persisted to enable:
+## Continuous Integration
 
-- debugging and replay
-- future visualization (e.g. show which planet caused each detour)
-- metrics and tuning (scores, offsets)
+The repository uses a GitHub Actions workflow that checks formatting, performs `cargo check`, runs Clippy with warnings denied, and executes workspace tests. This aligns well with the new workspace organization and is a natural evolution of the current CI setup. The previous workflow already performed formatting, Clippy, and tests, while the updated direction adds `cargo check` and uses workspace-oriented commands. fileciteturn4file5L1-L26
 
-| Column                                                                     | Type                     | Notes                                |
-|----------------------------------------------------------------------------|--------------------------|--------------------------------------|
-| `id`                                                                       | INTEGER PK               | Row identifier                       |
-| `route_id`                                                                 | INTEGER FK → `routes.id` | Route                                |
-| `idx`                                                                      | INTEGER                  | Detour index (chronological order)   |
-| `iteration`                                                                | INTEGER                  | Router iteration                     |
-| `segment_index`                                                            | INTEGER                  | Which segment was split              |
-| `obstacle_id`                                                              | INTEGER                  | Planet fid treated as obstacle       |
-| `obstacle_x`, `obstacle_y`                                                 | REAL                     | Obstacle center                      |
-| `obstacle_radius`                                                          | REAL                     | Safety radius used                   |
-| `closest_t`                                                                | REAL                     | Parametric t of closest point        |
-| `closest_qx`, `closest_qy`                                                 | REAL                     | Closest point on segment             |
-| `closest_dist`                                                             | REAL                     | Distance at collision time           |
-| `offset_used`                                                              | REAL                     | Offset used for candidate generation |
-| `wp_x`, `wp_y`                                                             | REAL                     | Chosen detour waypoint               |
-| `score_base`, `score_turn`, `score_back`, `score_proximity`, `score_total` | REAL                     | Score breakdown                      |
-| `created_at`                                                               | TEXT                     | UTC timestamp                        |
+---
 
-**Replace strategy**
+## Routing engine overview
 
-Same as route polyline:
+The routing engine computes hyperspace routes on a 2D galactic map using X/Y coordinates expressed in parsecs. The ideal route is a straight line between origin and destination, but planets create **hyperspace no-fly zones** that the route cannot cross. When the direct line intersects one or more obstacles, the engine inserts detour waypoints to bypass them safely. This general model, including collision detection and waypoint generation, is already documented in the existing README and remains one of the project’s most distinctive technical features. fileciteturn4file1L13-L64
 
-- `DELETE FROM route_detours WHERE route_id = ?`
-- insert the new detour decision list
+### Obstacle model
 
-### ✅ Persistence workflow (high-level)
+Each planet is treated as a circular obstacle in the galactic plane.
 
-When running `route compute <from> <to> [<via>...]`:
-1. Resolve the planet sequence to fids.
-2. Compute each leg in memory (FROM→TO, then TO→NEXT, etc.).
-3. Upsert each leg into `routes` (unique per pair).
-4. Replace the associated polylines in `route_waypoints`.
-5. Replace the associated decision logs in `route_detours`.
-6. For each detour waypoint:
-   - upsert into `waypoints` if computed (via `fingerprint`)
-   - optionally link waypoint ↔ planets in `waypoint_planets`
+The obstacle radius is controlled by the route safety configuration and represents navigational constraints such as:
 
-This ensures that the database always holds the most recent “best known” route for each pair.
+* gravitational mass shadows
+* hyperspace shear
+* interdiction fields
+* standard astrogation safety margins
+
+This radius does **not** represent the planet’s physical diameter.
+
+### Collision detection
+
+For each route segment, the engine:
+
+1. computes the closest point on the segment to nearby planets
+2. checks whether the distance is below the configured safety radius
+3. resolves the earliest hard collision first
+
+### Detour candidate generation
+
+When a collision is found, the engine generates candidate bypass points around the obstacle using multiple directions, including:
+
+* radial
+* lateral
+* forward
+* backward
+* diagonal directions
+
+This improves robustness in dense or complex regions of the map. The current README already describes this multi-direction candidate generation and offset growth strategy in detail. fileciteturn4file1L31-L64
+
+### Candidate scoring
+
+Each valid detour candidate is evaluated using a weighted score that combines:
+
+* path length increase
+* turn penalty
+* backtracking penalty
+* proximity penalty to nearby obstacles
+
+The candidate with the lowest total score is selected.
+
+### Iterative refinement
+
+After choosing a detour waypoint, the engine inserts it into the route polyline and restarts collision analysis from the beginning. The algorithm stops when:
+
+* no collisions remain, or
+* the configured maximum iteration count is reached
+
+The final route is therefore explainable, stable, and suitable for persistence, debugging, and future visualization. fileciteturn4file2L1-L37
+
+---
+
+## SQLite persistence model
+
+The project persists computed routes and generated detour waypoints in a local SQLite database. The current README already documents this as a caching and inspection layer for route computation, route replay, and future visualization support. fileciteturn4file3L87-L101
+
+### Why persistence matters
+
+Persistence supports:
+
+* route caching
+* easier debugging and inspection
+* deterministic `route show` / `route last` style workflows
+* future analytics and map visualization
+* progressive accumulation of reusable navigation waypoints
+
+### Main tables
+
+#### `waypoints`
+
+Global waypoint catalog containing both manual and computed waypoints.
+
+#### `waypoint_planets`
+
+Association table linking waypoints to nearby or related planets.
+
+#### `routes`
+
+Route cache entries keyed by origin/destination with associated options, length, iterations, status, and timestamps.
+
+The current README already emphasizes a key design rule: routes are unique per origin/destination pair, with recomputation updating the existing record rather than creating duplicates. fileciteturn4file4L11-L39
+
+#### `route_waypoints`
+
+Ordered route polyline entries for each stored route.
+
+The current persistence description also documents a replace strategy where recomputation removes and reinserts the stored polyline for the route. fileciteturn4file4L40-L66
+
+#### Additional route detail tables
+
+Depending on the current schema version, the database may also include tables for detour decisions, score breakdowns, and other route-related metadata used for inspection and debugging.
+
+---
+
+## Typical use cases
+
+### Quick exploration from the terminal
+
+Use the CLI when you want fast, scriptable queries:
+
+* search planets
+* inspect aliases
+* compute routes
+* review cached routes
+* export route data
+
+### Interactive usage
+
+Use the CLI interactive shell when you want a terminal-first exploratory workflow without retyping the executable name for every command.
+
+### Graphical exploration
+
+Use the GUI when you want a more visual workflow for searching planets, browsing information, and launching route-related actions from a desktop interface.
+
+---
+
+## Data source and acknowledgements
+
+The planetary data used by this project come from the **Star Wars Galaxy Map** project maintained by **Henry Bernberg**. The existing README already credits that source and states that this project uses the data for educational and non-commercial purposes only, with no affiliation with Lucasfilm or Disney. fileciteturn4file0L33-L46
+
+Original project:
+
+* **Star Wars Galaxy Map** — Explore the Galaxy Far, Far Away
+
+If you find that dataset valuable, please support the original author through the official channels listed in the upstream project.
+
+---
+
+## License
+
+This project is dual-licensed under either of the following, at your option:
+
+* MIT license
+* Apache License 2.0
+
+See:
+
+* `LICENSE-MIT`
+* `LICENSE-APACHE`
+
+---
+
+## Status
+
+The `0.9.0` series focuses on the workspace migration and architectural cleanup:
+
+* shared logic consolidated in `sw_galaxy_map_core`
+* CLI and GUI separated into their own crates
+* frontend launch behavior made explicit
+* CI aligned with workspace-based development
+
+This makes the project easier to maintain and creates a stronger base for future work on routing, persistence, visualization, and packaging.
+
+---
+
+## Contributing
+
+Contributions, issue reports, and suggestions are welcome.
+
+When contributing locally, please make sure the project passes:
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+```

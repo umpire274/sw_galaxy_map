@@ -1,9 +1,9 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::db::queries::search_planets;
 use crate::ui::warning;
-use crate::utils::normalize::normalize_text;
+use sw_galaxy_map_core::db::queries::search_planets;
+use sw_galaxy_map_core::utils::normalize_text;
 
 /// Return `-` if the value is None or empty/whitespace.
 fn cell(opt: &Option<String>) -> &str {

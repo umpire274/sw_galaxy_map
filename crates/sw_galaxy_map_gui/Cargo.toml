@@ -1,0 +1,24 @@
+[package]
+name = "sw_galaxy_map_gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+license.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+chrono.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+serde_json.workspace = true
+shell-words.workspace = true
+sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
