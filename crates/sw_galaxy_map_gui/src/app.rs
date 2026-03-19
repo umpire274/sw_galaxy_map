@@ -8,8 +8,10 @@
 // - JSON output is auto-detected and can be exported via the existing Export JSON button.
 // - NEW: Help popup that runs `--help`, `route --help`, etc. and renders output in a scrollable window.
 
+use anyhow::Result;
 use chrono::Local;
 use eframe::egui;
+use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -99,7 +101,7 @@ pub struct NavicomputerApp {
 }
 
 impl NavicomputerApp {
-    fn prevalidate_cli_tokens(tokens: &[String]) -> anyhow::Result<()> {
+    fn prevalidate_cli_tokens(tokens: &[String]) -> Result<()> {
         use sw_galaxy_map_core::validate;
 
         if tokens.is_empty() {
@@ -413,8 +415,13 @@ impl NavicomputerApp {
         }
     }
 
+    /// Resolve the CLI executable path from the runtime environment.
+    ///
+    /// Resolution order:
+    /// 1. `SW_GALAXY_MAP_CLI_EXE`, if defined and valid
+    /// 2. sibling executable next to the GUI binary
     fn cli_executable() -> Result<PathBuf, String> {
-        if let Ok(explicit) = std::env::var("SW_GALAXY_MAP_CLI_EXE") {
+        if let Ok(explicit) = env::var("SW_GALAXY_MAP_CLI_EXE") {
             let path = PathBuf::from(explicit);
             if path.is_file() {
                 return Ok(path);
@@ -422,13 +429,14 @@ impl NavicomputerApp {
         }
 
         let current =
-            std::env::current_exe().map_err(|e| format!("Failed to locate GUI executable: {e}"))?;
+            env::current_exe().map_err(|e| format!("Failed to locate GUI executable: {e}"))?;
         let Some(dir) = current.parent() else {
             return Err("Failed to resolve executable directory.".to_string());
         };
 
         #[cfg(target_os = "windows")]
         let candidate_names = ["sw_galaxy_map.exe", "sw_galaxy_map_cli.exe"];
+
         #[cfg(not(target_os = "windows"))]
         let candidate_names = ["sw_galaxy_map", "sw_galaxy_map_cli"];
 
@@ -440,27 +448,46 @@ impl NavicomputerApp {
         }
 
         Err(format!(
-            "Failed to locate the CLI executable next to {:?}. Set SW_GALAXY_MAP_CLI_EXE to override or run from the workspace root for cargo fallback.",
+            "Failed to locate the CLI executable next to {:?}. \
+             Set SW_GALAXY_MAP_CLI_EXE to override.",
             current
         ))
     }
 
-    fn workspace_root_from_manifest_dir() -> Option<PathBuf> {
-        let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        while dir.pop() {
-            if dir.join("Cargo.toml").is_file()
+    /// Try to discover the workspace root from the runtime executable path.
+    ///
+    /// This is a development-only fallback used when the GUI is launched from
+    /// a workspace checkout and no sibling CLI executable is available.
+    fn workspace_root_from_runtime() -> Option<PathBuf> {
+        let exe = env::current_exe().ok()?;
+        let mut dir = exe.parent()?.to_path_buf();
+
+        loop {
+            let cargo_toml = dir.join("Cargo.toml");
+            if cargo_toml.is_file()
                 && dir
                     .join("crates")
                     .join("sw_galaxy_map_cli")
                     .join("Cargo.toml")
                     .is_file()
+                && dir
+                    .join("crates")
+                    .join("sw_galaxy_map_gui")
+                    .join("Cargo.toml")
+                    .is_file()
             {
                 return Some(dir);
             }
+
+            if !dir.pop() {
+                break;
+            }
         }
+
         None
     }
 
+    /// Run a subprocess and capture stdout, stderr, and exit code.
     fn run_command_capture(cmd: &mut Command) -> Result<(String, String, i32), String> {
         match cmd.output() {
             Ok(r) => {
@@ -473,8 +500,11 @@ impl NavicomputerApp {
         }
     }
 
-    fn run_cargo_cli_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
-        let root = Self::workspace_root_from_manifest_dir()
+    /// Run the CLI through Cargo from a discovered workspace root.
+    ///
+    /// This fallback is intended only for development scenarios.
+    fn run_cargo_cli_capture(argv: &[String]) -> Result<(String, String, i32), String> {
+        let root = Self::workspace_root_from_runtime()
             .ok_or_else(|| "Workspace root not found for cargo fallback.".to_string())?;
 
         let mut cmd = Command::new("cargo");
@@ -483,19 +513,71 @@ impl NavicomputerApp {
             .arg("-q")
             .arg("-p")
             .arg("sw_galaxy_map_cli")
-            .arg("--");
-        cmd.args(argv);
+            .arg("--")
+            .args(argv);
+
         Self::run_command_capture(&mut cmd)
     }
 
-    fn run_exe_capture(&self, argv: &[String]) -> Result<(String, String, i32), String> {
+    /// Execute a CLI command for the GUI.
+    ///
+    /// Resolution order:
+    /// 1. explicit CLI executable from environment
+    /// 2. sibling CLI executable next to the GUI binary
+    /// 3. runtime workspace discovery + `cargo run -p sw_galaxy_map_cli`
+    fn run_exe_capture(argv: &[String]) -> Result<(String, String, i32), String> {
         if let Ok(exe) = Self::cli_executable() {
             let mut cmd = Command::new(exe);
             cmd.args(argv);
             return Self::run_command_capture(&mut cmd);
         }
 
-        self.run_cargo_cli_capture(argv)
+        Self::run_cargo_cli_capture(argv)
+    }
+
+    /// Load help text for the selected topic.
+    ///
+    /// The GUI first tries the CLI executable / cargo fallback path.
+    /// If that fails, it falls back to the in-process CLI help renderer.
+    fn load_help_text(topic: HelpTopic) -> String {
+        let argv = topic.argv();
+
+        if let Ok((out, err, _code)) = Self::run_exe_capture(&argv) {
+            let mut text = String::new();
+
+            if !out.trim().is_empty() {
+                text.push_str(&out);
+                if !out.ends_with('\n') {
+                    text.push('\n');
+                }
+            }
+
+            if !err.trim().is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&err);
+                if !err.ends_with('\n') {
+                    text.push('\n');
+                }
+            }
+
+            if !text.trim().is_empty() {
+                return text;
+            }
+        }
+
+        let help_args = match topic {
+            HelpTopic::General => vec![],
+            HelpTopic::Route => vec!["route".to_string()],
+            HelpTopic::Waypoint => vec!["waypoint".to_string()],
+            HelpTopic::Search => vec!["search".to_string()],
+            HelpTopic::Info => vec!["info".to_string()],
+            HelpTopic::Near => vec!["near".to_string()],
+        };
+
+        sw_galaxy_map_cli::render_help_for(&help_args)
+            .unwrap_or_else(|e| format!("❌ Failed to load help:\n{e}\n"))
     }
 
     fn append_non_empty(buf: &mut String, s: &str) {
@@ -547,7 +629,7 @@ impl NavicomputerApp {
         self.error = None;
         self.set_status("Running command...");
 
-        let (out, err, code) = match self.run_exe_capture(&tokens) {
+        let (out, err, code) = match Self::run_exe_capture(&tokens) {
             Ok(t) => t,
             Err(e) => {
                 self.running = false;
@@ -658,42 +740,16 @@ impl NavicomputerApp {
         self.help_loading = true;
         self.help_text.clear();
 
-        // Render immediately (shows "Loading..." for one frame)
         ctx.request_repaint();
 
-        let argv = topic.argv();
-        let (out, err, _code) = match self.run_exe_capture(&argv) {
-            Ok(t) => t,
-            Err(e) => {
-                self.help_loading = false;
-                self.help_text = format!("❌ Failed to load help:\n{e}\n");
-                self.help_last_loaded_at = Some(Instant::now());
-                return;
-            }
+        let text = Self::load_help_text(topic);
+
+        self.help_text = if text.trim().is_empty() {
+            "No help output captured.\n".to_string()
+        } else {
+            text
         };
 
-        let mut text = String::new();
-        if !out.trim().is_empty() {
-            text.push_str(&out);
-            if !out.ends_with('\n') {
-                text.push('\n');
-            }
-        }
-        if !err.trim().is_empty() {
-            if !text.is_empty() {
-                text.push('\n');
-            }
-            text.push_str(&err);
-            if !err.ends_with('\n') {
-                text.push('\n');
-            }
-        }
-
-        if text.trim().is_empty() {
-            text = "No help output captured.\n".to_string();
-        }
-
-        self.help_text = text;
         self.help_loading = false;
         self.help_last_loaded_at = Some(Instant::now());
     }
@@ -804,7 +860,7 @@ impl NavicomputerApp {
         }
     }
 
-    fn with_clipboard_text<F: FnOnce(&mut Clipboard) -> anyhow::Result<String>>(
+    fn with_clipboard_text<F: FnOnce(&mut Clipboard) -> Result<String>>(
         &mut self,
         f: F,
     ) -> Option<String> {
