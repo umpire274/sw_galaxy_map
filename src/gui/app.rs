@@ -73,6 +73,8 @@ pub struct NavicomputerApp {
 
     cmd_saved_sel: Option<egui::text::CCursorRange>,
     out_saved_sel: Option<egui::text::CCursorRange>,
+    cmd_double_click_word: Option<(usize, usize)>,
+    cmd_last_primary_press: Option<(Instant, usize)>,
 
     // Bootstrap
     boot_lines: Vec<&'static str>,
@@ -264,6 +266,8 @@ impl NavicomputerApp {
             running: false,
             cmd_saved_sel: None,
             out_saved_sel: None,
+            cmd_double_click_word: None,
+            cmd_last_primary_press: None,
             boot_lines,
             boot_step: 0,
             boot_next: Some(Instant::now() + Duration::from_millis(300)),
@@ -774,6 +778,48 @@ impl NavicomputerApp {
             st.store(ctx, id);
         }
     }
+
+    fn select_word_at_index_prefer_left(text: &str, cursor_index: usize) -> Option<(usize, usize)> {
+        let chars: Vec<char> = text.chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+
+        let mut idx = cursor_index.min(chars.len());
+
+        if idx == chars.len() || chars.get(idx).is_some_and(|c| c.is_whitespace()) {
+            if idx > 0 && !chars[idx - 1].is_whitespace() {
+                idx -= 1;
+            } else if idx < chars.len() && !chars[idx].is_whitespace() {
+                // keep idx
+            } else {
+                return None;
+            }
+        }
+
+        if chars[idx].is_whitespace() {
+            return None;
+        }
+
+        let mut start = idx;
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+
+        let mut end = idx + 1;
+        while end < chars.len() && !chars[end].is_whitespace() {
+            end += 1;
+        }
+
+        Some((start, end))
+    }
+
+    fn cmd_selection_from_char_range(start: usize, end: usize) -> egui::text::CCursorRange {
+        egui::text::CCursorRange::two(
+            egui::text::CCursor::new(start),
+            egui::text::CCursor::new(end),
+        )
+    }
 }
 
 impl eframe::App for NavicomputerApp {
@@ -786,8 +832,12 @@ impl eframe::App for NavicomputerApp {
         self.tick_status_deadline();
 
         // Snapshot current selections so we can restore them when opening context menus
-        self.cmd_saved_sel = Self::save_selection(ctx, cmd_id);
-        self.out_saved_sel = Self::save_selection(ctx, out_id);
+        if let Some(sel) = Self::save_selection(ctx, cmd_id) {
+            self.cmd_saved_sel = Some(sel);
+        }
+        if let Some(sel) = Self::save_selection(ctx, out_id) {
+            self.out_saved_sel = Some(sel);
+        }
 
         // --- Window title
         let base = "SW Galaxy Map — Navicomputer";
@@ -851,6 +901,61 @@ impl eframe::App for NavicomputerApp {
                                 .interactive(true)
                                 .frame(false),
                         );
+
+                        if resp.hovered()
+                            && ui.ctx().input(|i| i.pointer.primary_pressed())
+                            && let Some(sel) = Self::save_selection(ui.ctx(), cmd_id)
+                        {
+                            let cursor = sel.primary.index;
+                            let now = Instant::now();
+                            if let Some((last_press_at, last_cursor)) = self.cmd_last_primary_press
+                                && now.duration_since(last_press_at) <= Duration::from_millis(500)
+                                && cursor.abs_diff(last_cursor) <= 1
+                                && let Some((start, end)) =
+                                    Self::select_word_at_index_prefer_left(&self.command, cursor)
+                            {
+                                let word_sel = Self::cmd_selection_from_char_range(start, end);
+                                Self::restore_selection(ui.ctx(), cmd_id, &word_sel);
+                                self.cmd_saved_sel = Some(word_sel);
+                                self.cmd_double_click_word = Some((start, end));
+                            }
+                            self.cmd_last_primary_press = Some((now, cursor));
+                        }
+
+                        if resp.double_clicked()
+                            && let Some(sel) = Self::save_selection(ui.ctx(), cmd_id)
+                        {
+                            let range = sel.as_sorted_char_range();
+                            let word_sel =
+                                Self::cmd_selection_from_char_range(range.start, range.end);
+                            Self::restore_selection(ui.ctx(), cmd_id, &word_sel);
+                            self.cmd_saved_sel = Some(word_sel);
+                            self.cmd_double_click_word = Some((range.start, range.end));
+                        }
+
+                        if let Some((anchor_start, anchor_end)) = self.cmd_double_click_word {
+                            if ui.ctx().input(|i| i.pointer.primary_down()) {
+                                if resp.dragged()
+                                    && let Some(sel) = Self::save_selection(ui.ctx(), cmd_id)
+                                {
+                                    let cursor = sel.primary.index;
+                                    let drag_sel = if cursor >= anchor_end {
+                                        Self::cmd_selection_from_char_range(anchor_start, cursor)
+                                    } else if cursor <= anchor_start {
+                                        Self::cmd_selection_from_char_range(cursor, anchor_end)
+                                    } else {
+                                        Self::cmd_selection_from_char_range(
+                                            anchor_start,
+                                            anchor_end,
+                                        )
+                                    };
+                                    Self::restore_selection(ui.ctx(), cmd_id, &drag_sel);
+                                    self.cmd_saved_sel = Some(drag_sel);
+                                }
+                            } else {
+                                self.cmd_double_click_word = None;
+                            }
+                        }
 
                         // Context menu (right click): Copy / Cut / Paste
                         resp.context_menu(|ui| {
@@ -1007,6 +1112,10 @@ impl eframe::App for NavicomputerApp {
 
                             resp.context_menu(|ui| {
                                 ui.set_min_width(120.0);
+
+                                if let Some(sel) = Self::save_selection(ui.ctx(), out_id) {
+                                    self.out_saved_sel = Some(sel);
+                                }
 
                                 ui.ctx().memory_mut(|m| m.request_focus(out_id));
                                 if let Some(sel) = &self.out_saved_sel {
