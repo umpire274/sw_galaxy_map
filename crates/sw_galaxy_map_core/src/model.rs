@@ -288,4 +288,6 @@ pub struct PlanetSearchRow {
     pub sector: Option<String>,
     pub system: Option<String>,
     pub grid: Option<String>,
+    pub x: f64,
+    pub y: f64,
 }

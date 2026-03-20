@@ -60,9 +60,10 @@ cargo run -p sw_galaxy_map_cli -- unknown search 42 --near 1500
 cargo run -p sw_galaxy_map_cli -- unknown list
 cargo run -p sw_galaxy_map_cli -- unknown list --page 2
 cargo run -p sw_galaxy_map_cli -- unknown list --page 2 --page-size 50
+cargo run -p sw_galaxy_map_cli -- unknown edit 42 --planet "Ord Mantell" --region "Mid Rim" --canon true --legend false --reviewed true --notes "manual review"
 ```
 
-`unknown list` now shows the internal unknown `ID` together with the source `FID`, making the table ready for future commands such as `unknown show <id>` and `unknown edit <id>`.
+`unknown list` now shows the internal unknown `ID` together with the source `FID`, and `unknown edit <id>` can update the staging fields directly from a single CLI command.
 
 ---
 

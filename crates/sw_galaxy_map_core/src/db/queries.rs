@@ -292,6 +292,92 @@ pub fn near_planets_for_unknown_id(
     Ok((unknown, rows))
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct UnknownPlanetUpdate {
+    pub planet: Option<String>,
+    pub region: Option<Option<String>>,
+    pub sector: Option<Option<String>>,
+    pub system: Option<Option<String>>,
+    pub grid: Option<Option<String>>,
+    pub canon: Option<Option<i64>>,
+    pub legends: Option<Option<i64>>,
+    pub c_region: Option<Option<String>>,
+    pub c_region_li: Option<Option<String>>,
+    pub reviewed: Option<i64>,
+    pub notes: Option<Option<String>>,
+}
+
+pub fn update_unknown_planet(
+    con: &Connection,
+    id: i64,
+    update: &UnknownPlanetUpdate,
+) -> Result<UnknownPlanet> {
+    let Some(current) = get_unknown_planet_by_id(con, id)? else {
+        anyhow::bail!("No unknown planet found for id {}", id);
+    };
+
+    let planet = update
+        .planet
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| current.planet.clone());
+    let planet_norm = planet.to_lowercase();
+
+    let region = update.region.clone().unwrap_or(current.region.clone());
+    let sector = update.sector.clone().unwrap_or(current.sector.clone());
+    let system = update.system.clone().unwrap_or(current.system.clone());
+    let grid = update.grid.clone().unwrap_or(current.grid.clone());
+    let canon = update.canon.unwrap_or(current.canon);
+    let legends = update.legends.unwrap_or(current.legends);
+    let c_region = update.c_region.clone().unwrap_or(current.c_region.clone());
+    let c_region_li = update
+        .c_region_li
+        .clone()
+        .unwrap_or(current.c_region_li.clone());
+    let reviewed = update.reviewed.unwrap_or(current.reviewed);
+    let notes = update.notes.clone().unwrap_or(current.notes.clone());
+
+    con.execute(
+        r#"
+        UPDATE planets_unknown
+        SET planet = ?2,
+            planet_norm = ?3,
+            region = ?4,
+            sector = ?5,
+            system = ?6,
+            grid = ?7,
+            canon = ?8,
+            legends = ?9,
+            cregion = ?10,
+            cregion_li = ?11,
+            reviewed = ?12,
+            notes = ?13
+        WHERE id = ?1
+        "#,
+        params![
+            id,
+            planet,
+            planet_norm,
+            region,
+            sector,
+            system,
+            grid,
+            canon,
+            legends,
+            c_region,
+            c_region_li,
+            reviewed,
+            notes,
+        ],
+    )
+    .with_context(|| format!("Failed to update planets_unknown record id={id}"))?;
+
+    get_unknown_planet_by_id(con, id)?
+        .ok_or_else(|| anyhow::anyhow!("Unknown planet disappeared after update: id={id}"))
+}
+
 pub fn get_aliases(con: &Connection, fid: i64) -> Result<Vec<AliasRow>> {
     let mut stmt = con.prepare(
         r#"
@@ -364,6 +450,8 @@ fn search_planets_like(
                 sector: r.get::<_, Option<String>>(3)?,
                 system: r.get::<_, Option<String>>(4)?,
                 grid: r.get::<_, Option<String>>(5)?,
+                x: r.get(6)?,
+                y: r.get(7)?,
             })
         })
         .context("Failed to execute LIKE search query")?;
@@ -383,7 +471,7 @@ fn search_planets_fts(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
             WHERE p.deleted = 0 AND planets_fts MATCH ?1
@@ -402,6 +490,8 @@ fn search_planets_fts(
                 sector: r.get::<_, Option<String>>(3)?,
                 system: r.get::<_, Option<String>>(4)?,
                 grid: r.get::<_, Option<String>>(5)?,
+                x: r.get(6)?,
+                y: r.get(7)?,
             })
         })
         .context("Failed to execute FTS search query")?;
@@ -1654,7 +1744,10 @@ pub fn list_routes(
 
 #[cfg(test)]
 mod tests {
-    use super::{near_planets, near_planets_excluding_fid, search_planets};
+    use super::{
+        UnknownPlanetUpdate, near_planets, near_planets_excluding_fid, search_planets,
+        update_unknown_planet,
+    };
     use rusqlite::Connection;
 
     fn setup_search_db() -> Connection {
@@ -1687,6 +1780,53 @@ mod tests {
             "#,
         )
         .expect("schema setup");
+        con
+    }
+
+    fn setup_unknown_db() -> Connection {
+        let con = Connection::open_in_memory().expect("in-memory sqlite");
+        con.execute_batch(
+            r#"
+            CREATE TABLE planets_unknown (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                fid         INTEGER,
+                planet      TEXT NOT NULL,
+                planet_norm TEXT NOT NULL,
+                region      TEXT,
+                sector      TEXT,
+                system      TEXT,
+                grid        TEXT,
+                x           REAL,
+                y           REAL,
+                arcgis_hash TEXT,
+                deleted     INTEGER NOT NULL DEFAULT 0,
+                canon       INTEGER,
+                legends     INTEGER,
+                zm          INTEGER,
+                name0       TEXT,
+                name1       TEXT,
+                name2       TEXT,
+                lat         REAL,
+                long        REAL,
+                ref         TEXT,
+                status      TEXT,
+                cregion     TEXT,
+                cregion_li  TEXT,
+                reason      TEXT,
+                reviewed    INTEGER NOT NULL DEFAULT 0,
+                promoted    INTEGER NOT NULL DEFAULT 0,
+                notes       TEXT
+            );
+            INSERT INTO planets_unknown (
+                id, fid, planet, planet_norm, region, sector, system, grid, x, y, canon,
+                legends, cregion, cregion_li, reviewed, promoted, notes
+            ) VALUES (
+                7, 1007, 'TBD World', 'tbd world', 'Unknown Regions', 'Sector A',
+                'System A', 'A-1', 1.0, 2.0, NULL, NULL, NULL, NULL, 0, 0, 'draft'
+            );
+            "#,
+        )
+        .expect("unknown schema setup");
         con
     }
 
@@ -1736,5 +1876,42 @@ mod tests {
             near_planets_excluding_fid(&con, 1, 10.0, 10.0, 30.0, 10).expect("excluding fid");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].planet, "Tatooine");
+    }
+
+    #[test]
+    fn update_unknown_planet_updates_requested_fields_and_planet_norm() {
+        let con = setup_unknown_db();
+
+        let updated = update_unknown_planet(
+            &con,
+            7,
+            &UnknownPlanetUpdate {
+                planet: Some("Ord Mantell".to_string()),
+                region: Some(Some("Mid Rim".to_string())),
+                sector: Some(None),
+                system: Some(Some("Bright Jewel".to_string())),
+                grid: Some(Some("M-12".to_string())),
+                canon: Some(Some(1)),
+                legends: Some(Some(0)),
+                c_region: Some(Some("Mid Rim".to_string())),
+                c_region_li: Some(Some("Mid Rim Territories".to_string())),
+                reviewed: Some(1),
+                notes: Some(Some("verified manually".to_string())),
+            },
+        )
+        .expect("update succeeds");
+
+        assert_eq!(updated.planet, "Ord Mantell");
+        assert_eq!(updated.planet_norm, "ord mantell");
+        assert_eq!(updated.region.as_deref(), Some("Mid Rim"));
+        assert_eq!(updated.sector, None);
+        assert_eq!(updated.system.as_deref(), Some("Bright Jewel"));
+        assert_eq!(updated.grid.as_deref(), Some("M-12"));
+        assert_eq!(updated.canon, Some(1));
+        assert_eq!(updated.legends, Some(0));
+        assert_eq!(updated.c_region.as_deref(), Some("Mid Rim"));
+        assert_eq!(updated.c_region_li.as_deref(), Some("Mid Rim Territories"));
+        assert_eq!(updated.reviewed, 1);
+        assert_eq!(updated.notes.as_deref(), Some("verified manually"));
     }
 }

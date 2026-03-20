@@ -166,15 +166,16 @@ fn m_to_v5(tx: &Transaction<'_>) -> Result<()> {
         -- WAYPOINTS (catalog)
         -- =========================
         CREATE TABLE IF NOT EXISTS waypoints (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL,
-            name_norm  TEXT NOT NULL,
-            x          REAL NOT NULL,
-            y          REAL NOT NULL,
-            kind       TEXT NOT NULL DEFAULT 'manual',
-            note       TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            name_norm   TEXT NOT NULL,
+            x           REAL NOT NULL,
+            y           REAL NOT NULL,
+            kind        TEXT NOT NULL DEFAULT 'manual',
+            fingerprint TEXT NOT NULL DEFAULT '',
+            note        TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_name_norm
@@ -182,6 +183,9 @@ fn m_to_v5(tx: &Transaction<'_>) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_waypoints_xy
           ON waypoints(x, y);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_fingerprint
+          ON waypoints(fingerprint);
 
         CREATE TRIGGER IF NOT EXISTS trg_waypoints_updated_at
         AFTER UPDATE ON waypoints

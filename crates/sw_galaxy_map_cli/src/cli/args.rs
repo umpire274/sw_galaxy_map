@@ -182,6 +182,56 @@ pub enum UnknownCmd {
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
+
+    /// Edit an unknown planet record in `planets_unknown`
+    Edit {
+        /// Internal unknown record ID
+        id: i64,
+
+        /// Planet name
+        #[arg(long)]
+        planet: Option<String>,
+
+        /// Region
+        #[arg(long)]
+        region: Option<String>,
+
+        /// Sector
+        #[arg(long)]
+        sector: Option<String>,
+
+        /// System
+        #[arg(long)]
+        system: Option<String>,
+
+        /// Grid
+        #[arg(long)]
+        grid: Option<String>,
+
+        /// Canon flag (true/false)
+        #[arg(long)]
+        canon: Option<bool>,
+
+        /// Legends flag (true/false)
+        #[arg(long)]
+        legend: Option<bool>,
+
+        /// Canonical region
+        #[arg(long = "cregion")]
+        c_region: Option<String>,
+
+        /// Canonical region (long label)
+        #[arg(long = "cregion-li")]
+        c_region_li: Option<String>,
+
+        /// Reviewed flag (true/false)
+        #[arg(long)]
+        reviewed: Option<bool>,
+
+        /// Free-form notes
+        #[arg(long)]
+        notes: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
