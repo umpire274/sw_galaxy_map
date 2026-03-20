@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-03-20
+
+### 🎨 Improvements
+
+- Properly embedded application icon into Windows executable (`.exe`) for GUI application
+- Moved Windows resource embedding (`winres`) from workspace root to `sw_galaxy_map_gui` crate
+- Added dedicated `build.rs` in GUI crate for correct icon compilation
+
+### 🧩 Refactor
+
+- Removed ineffective `build.rs` from virtual workspace root
+- Reorganized icon asset placement under GUI crate (`crates/sw_galaxy_map_gui/assets/`)
+
+### 🐛 Fixes
+
+- Fixed issue where `.exe` did not display custom icon in Windows Explorer
+
+---
+
 ## [0.9.1] - 2026-03-19
 
 ### Fixed
