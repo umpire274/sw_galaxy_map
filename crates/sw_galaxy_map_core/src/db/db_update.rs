@@ -500,12 +500,24 @@ pub fn run(
         tx.execute("DELETE FROM planets_unknown", [])?;
         let mut stmt = tx.prepare_cached(
             r#"
-            INSERT INTO planets_unknown(fid, planet, x, y, reason)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             "#,
         )?;
         for row in &skipped_rows {
-            stmt.execute(params![row.fid, row.planet, row.x, row.y, row.reason])?;
+            let planet = row
+                .planet
+                .clone()
+                .unwrap_or_else(|| "(unknown)".to_string());
+            let planet_norm = normalize_text(&planet);
+            stmt.execute(params![
+                row.fid,
+                planet,
+                planet_norm,
+                row.x,
+                row.y,
+                row.reason
+            ])?;
         }
         drop(stmt);
 

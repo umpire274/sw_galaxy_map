@@ -5,42 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.6] - 2026-03-20
+
+### Added
+
+- aligned `planets_unknown` with the `planets` schema to support future staging/edit workflows
+- added an internal unknown-record `id` primary key plus `reviewed`, `promoted`, and `notes` workflow fields
+- added normalized `planet_norm` storage for unknown rows to prepare future matching and editing commands
+
+### Changed
+
+- `unknown list` now displays both internal unknown `ID` and source `FID`
+- `unknown search <id> --near <parsecs>` now resolves nearby planets from the unknown table using the internal unknown record id
+- database provisioning and incremental updates now populate the expanded `planets_unknown` staging schema 
+- Added pagination support to `unknown list` with `--page` and `--page-size`
+- bumped workspace version to `0.9.6`
+
+### Fixed
+
+- preserved the robust squared-distance SQL strategy for nearby unknown-planet search while moving to the staged unknown-record model
+
+---
+
 ## [0.9.5] - 2026-03-20
 
 ### Added
 
-- Added `unknown list` command to display entries from the `planets_unknown` table
-- Added `unknown search <id> --near <parsecs>` to find known planets near an unknown planet
-- Added optional result limiting for nearby unknown search output
+- added `unknown list` to display records from `planets_unknown`
+- added `unknown search <fid> --near <parsecs>` to find known planets near an unknown planet (superseded in `0.9.6` by internal unknown record IDs)
+- added core query helpers for listing unknown planets and resolving nearby known planets from unknown coordinates
 
 ### Changed
 
-- Implemented nearby planet lookup using a robust squared-distance SQL query based on `x` and `y` coordinates from
-  `planets_unknown`
-- Sorted nearby search results by ascending distance for clearer exploration workflows
-
-### Fixed
-
-- Kept Windows GUI executable icon embedding in the correct GUI crate build pipeline
-
----
-
-## [0.9.2] - 2026-03-20
-
-### 🎨 Improvements
-
-- Properly embedded application icon into Windows executable (`.exe`) for GUI application
-- Moved Windows resource embedding (`winres`) from workspace root to `sw_galaxy_map_gui` crate
-- Added dedicated `build.rs` in GUI crate for correct icon compilation
-
-### 🧩 Refactor
-
-- Removed ineffective `build.rs` from virtual workspace root
-- Reorganized icon asset placement under GUI crate (`crates/sw_galaxy_map_gui/assets/`)
-
-### 🐛 Fixes
-
-- Fixed issue where `.exe` did not display custom icon in Windows Explorer
+- nearby search for unknown planets uses the robust squared-distance SQL strategy based on `x`/`y` coordinates
+- bumped workspace version to `0.9.5`
 
 ---
 

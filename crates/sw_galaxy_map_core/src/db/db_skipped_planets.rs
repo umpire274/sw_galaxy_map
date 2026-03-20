@@ -5,6 +5,7 @@ use serde_json;
 
 #[derive(Debug, Serialize)]
 struct SkippedPlanetRow {
+    id: i64,
     fid: Option<i64>,
     planet: Option<String>,
     x: Option<f64>,
@@ -16,9 +17,9 @@ pub fn run(con: &mut Connection) -> Result<()> {
     let mut stmt = con
         .prepare(
             r#"
-            SELECT fid, planet, x, y, reason
+            SELECT id, fid, planet, x, y, reason
             FROM planets_unknown
-            ORDER BY fid
+            ORDER BY id
             "#,
         )
         .context("Failed to query skipped planets table")?;
@@ -26,11 +27,12 @@ pub fn run(con: &mut Connection) -> Result<()> {
     let rows = stmt
         .query_map([], |r| {
             Ok(SkippedPlanetRow {
-                fid: r.get(0)?,
-                planet: r.get(1)?,
-                x: r.get(2)?,
-                y: r.get(3)?,
-                reason: r.get(4)?,
+                id: r.get(0)?,
+                fid: r.get(1)?,
+                planet: r.get(2)?,
+                x: r.get(3)?,
+                y: r.get(4)?,
+                reason: r.get(5)?,
             })
         })
         .context("Failed to read skipped planets rows")?;

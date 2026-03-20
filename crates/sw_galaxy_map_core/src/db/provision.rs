@@ -95,12 +95,46 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         DROP TABLE IF EXISTS planets_unknown;
 
         CREATE TABLE planets_unknown (
-            fid    INTEGER,
-            planet TEXT,
-            x      REAL,
-            y      REAL,
-            reason TEXT
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            fid         INTEGER,
+            planet      TEXT NOT NULL,
+            planet_norm TEXT NOT NULL,
+            region      TEXT,
+            sector      TEXT,
+            system      TEXT,
+            grid        TEXT,
+            x           REAL NOT NULL,
+            y           REAL NOT NULL,
+            arcgis_hash TEXT,
+            deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
+            canon       INTEGER,
+            legends     INTEGER,
+            zm          INTEGER,
+            name0       TEXT,
+            name1       TEXT,
+            name2       TEXT,
+            lat         REAL,
+            long        REAL,
+            ref         TEXT,
+            status      TEXT,
+            cregion     TEXT,
+            cregion_li  TEXT,
+            reason      TEXT,
+            reviewed    INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0,1)),
+            promoted    INTEGER NOT NULL DEFAULT 0 CHECK (promoted IN (0,1)),
+            notes       TEXT,
+            CHECK (canon IS NULL OR canon IN (0,1)),
+            CHECK (legends IS NULL OR legends IN (0,1))
         );
+
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_fid         ON planets_unknown(fid);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_planet      ON planets_unknown(planet);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_planet_norm ON planets_unknown(planet_norm);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_sector      ON planets_unknown(sector);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_system      ON planets_unknown(system);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_xy          ON planets_unknown(x, y);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_reviewed    ON planets_unknown(reviewed);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_promoted    ON planets_unknown(promoted);
 
         -- =========================
         -- WAYPOINTS (catalog)
@@ -384,7 +418,7 @@ pub fn insert_all(
     meta_upsert(&tx, "dataset_version", &meta.dataset_version)?;
     meta_upsert(&tx, "importer_version", &meta.importer_version)?;
     meta_upsert(&tx, "fts_enabled", if enable_fts { "1" } else { "0" })?;
-    meta_upsert(&tx, "schema_version", "11")?;
+    meta_upsert(&tx, "schema_version", "12")?;
 
     {
         let mut stmt = tx.prepare(

@@ -37,23 +37,9 @@ pub fn run(
         let fid = fid.ok_or_else(|| anyhow::anyhow!("--fid is required with --unknown"))?;
         let unknown_planet = get_unknown_planet_by_fid(con, fid)?
             .ok_or_else(|| anyhow::anyhow!("No unknown planet found for fid {}", fid))?;
-        let x = unknown_planet.x.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Unknown planet fid {} has no X coordinate (reason: {}).",
-                fid,
-                unknown_planet.reason.as_deref().unwrap_or("missing_x")
-            )
-        })?;
-        let y = unknown_planet.y.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Unknown planet fid {} has no Y coordinate (reason: {}).",
-                fid,
-                unknown_planet.reason.as_deref().unwrap_or("missing_y")
-            )
-        })?;
-        let name = unknown_planet
-            .planet
-            .unwrap_or_else(|| format!("(unknown fid {fid})"));
+        let x = unknown_planet.x;
+        let y = unknown_planet.y;
+        let name = unknown_planet.planet;
 
         println!("Center: {} (X={:.3}, Y={:.3})", name, x, y);
         println!("Radius: {:.3} parsecs", r);

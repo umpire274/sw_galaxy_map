@@ -364,6 +364,7 @@ fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
             println!("  near --planet coruscant -r 50");
             println!("  route show 42");
             println!("  unknown list");
+            println!("  unknown search <id> --near <parsecs>");
             println!("Or REPL help: :help\n");
             continue;
         }
