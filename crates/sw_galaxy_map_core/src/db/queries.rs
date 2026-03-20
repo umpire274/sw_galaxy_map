@@ -6,7 +6,7 @@ use crate::model::{
 pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
@@ -67,7 +67,7 @@ const UNKNOWN_PLANET_SELECT: &str = r#"
 fn unknown_planet_from_row(r: &Row<'_>) -> rusqlite::Result<UnknownPlanet> {
     Ok(UnknownPlanet {
         id: r.get("id")?,
-        fid: r.get("fid")?,
+        fid: r.get::<_, Option<i64>>("fid")?,
         planet: r.get("planet")?,
         planet_norm: r.get("planet_norm")?,
         region: r.get("region")?,
@@ -281,7 +281,14 @@ pub fn near_planets_for_unknown_id(
     let unknown = get_unknown_planet_by_id(con, unknown_id)?
         .ok_or_else(|| anyhow::anyhow!("No unknown planet found for id {}", unknown_id))?;
 
-    let rows = near_planets(con, unknown.x, unknown.y, radius, limit)?;
+    let origin_x = unknown.x.ok_or_else(|| {
+        rusqlite::Error::InvalidQuery // oppure meglio errore custom, vedi sotto
+    })?;
+
+    let origin_y = unknown.y.ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+
+    let rows = near_planets(con, origin_x, origin_y, radius, limit)?;
+
     Ok((unknown, rows))
 }
 
