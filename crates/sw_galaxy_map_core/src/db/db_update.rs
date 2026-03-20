@@ -217,6 +217,112 @@ fn db_get_hash_and_deleted(tx: &Transaction<'_>, fid: i64) -> Result<Option<(Str
     .map_err(Into::into)
 }
 
+fn find_existing_unknown_id(
+    tx: &Transaction<'_>,
+    row: &SkippedPlanetRow,
+    planet_norm: &str,
+) -> Result<Option<i64>> {
+    if let Some(fid) = row.fid {
+        tx.query_row(
+            "SELECT id FROM planets_unknown WHERE fid = ?1 ORDER BY id LIMIT 1",
+            [fid],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    } else {
+        tx.query_row(
+            r#"
+            SELECT id
+            FROM planets_unknown
+            WHERE fid IS NULL
+              AND planet_norm = ?1
+              AND x IS ?2
+              AND y IS ?3
+              AND reason = ?4
+            ORDER BY id
+            LIMIT 1
+            "#,
+            params![planet_norm, row.x, row.y, row.reason],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+}
+
+fn sync_unknown_planets(tx: &Transaction<'_>, skipped_rows: &[SkippedPlanetRow]) -> Result<()> {
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS __seen_unknown_ids;          CREATE TEMP TABLE __seen_unknown_ids(id INTEGER PRIMARY KEY);",
+    )?;
+
+    let mut mark_seen = tx.prepare("INSERT OR IGNORE INTO __seen_unknown_ids(id) VALUES (?1)")?;
+    let mut update_stmt = tx.prepare_cached(
+        r#"
+        UPDATE planets_unknown
+        SET
+            fid = ?2,
+            planet = ?3,
+            planet_norm = ?4,
+            x = ?5,
+            y = ?6,
+            reason = ?7
+        WHERE id = ?1
+        "#,
+    )?;
+    let mut insert_stmt = tx.prepare_cached(
+        r#"
+        INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+    )?;
+
+    for row in skipped_rows {
+        let planet = row
+            .planet
+            .clone()
+            .unwrap_or_else(|| "(unknown)".to_string());
+        let planet_norm = normalize_text(&planet);
+
+        let unknown_id = if let Some(id) = find_existing_unknown_id(tx, row, &planet_norm)? {
+            update_stmt.execute(params![
+                id,
+                row.fid,
+                planet,
+                planet_norm,
+                row.x,
+                row.y,
+                row.reason,
+            ])?;
+            id
+        } else {
+            insert_stmt.execute(params![
+                row.fid,
+                planet,
+                planet_norm,
+                row.x,
+                row.y,
+                row.reason
+            ])?;
+            tx.last_insert_rowid()
+        };
+
+        mark_seen.execute([unknown_id])?;
+    }
+
+    drop(mark_seen);
+    drop(update_stmt);
+    drop(insert_stmt);
+
+    tx.execute(
+        "DELETE FROM planets_unknown WHERE id NOT IN (SELECT id FROM __seen_unknown_ids)",
+        [],
+    )?;
+    tx.execute_batch("DROP TABLE IF EXISTS __seen_unknown_ids;")?;
+
+    Ok(())
+}
+
 fn mark_deleted_missing(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Result<i64> {
     // Mark planets not in remote feed as deleted=1
     // For SQLite, best approach: create temp table and join.
@@ -497,29 +603,7 @@ pub fn run(
         meta_upsert_public(&tx, "update_mode", "incremental")?;
         meta_upsert_public(&tx, "prune_used", if prune { "1" } else { "0" })?;
 
-        tx.execute("DELETE FROM planets_unknown", [])?;
-        let mut stmt = tx.prepare_cached(
-            r#"
-            INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-        )?;
-        for row in &skipped_rows {
-            let planet = row
-                .planet
-                .clone()
-                .unwrap_or_else(|| "(unknown)".to_string());
-            let planet_norm = normalize_text(&planet);
-            stmt.execute(params![
-                row.fid,
-                planet,
-                planet_norm,
-                row.x,
-                row.y,
-                row.reason
-            ])?;
-        }
-        drop(stmt);
+        sync_unknown_planets(&tx, &skipped_rows)?;
 
         tx.commit().context("Failed to commit db update")?;
     } else {

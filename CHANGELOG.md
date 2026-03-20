@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.7] - 2026-03-20
+
+### 🐛 Fixed
+
+- Fixed crash in `unknown list` when encountering records with NULL `fid`
+- Updated `UnknownPlanet.fid` to `Option<i64>` to properly support nullable database values
+- Fixed formatting issues when printing optional coordinates (`x`, `y`) in CLI output
+- Fixed invalid formatting specifiers for optional values in `unknown list`
+
+### 🔄 Improved
+
+- Improved robustness of unknown planet handling with incomplete data (missing `fid`, `x`, `y`)
+- Added validation for coordinates before executing proximity search (`unknown search`, `near`)
+- Improved CLI error messages for missing coordinates
+
+### 🧩 Internal
+
+- Aligned Rust models with database schema for `planets_unknown`
+- Ensured consistent handling of nullable fields across DB layer and CLI
+
+---
+
 ## [0.9.6] - 2026-03-20
 
 ### Added
@@ -16,14 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - `unknown list` now displays both internal unknown `ID` and source `FID`
-- `unknown search <id> --near <parsecs>` now resolves nearby planets from the unknown table using the internal unknown record id
-- database provisioning and incremental updates now populate the expanded `planets_unknown` staging schema 
+- `unknown search <id> --near <parsecs>` now resolves nearby planets from the unknown table using the internal unknown
+  record id
+- database provisioning and incremental updates now populate the expanded `planets_unknown` staging schema
 - Added pagination support to `unknown list` with `--page` and `--page-size`
 - bumped workspace version to `0.9.6`
 
 ### Fixed
 
-- preserved the robust squared-distance SQL strategy for nearby unknown-planet search while moving to the staged unknown-record model
+- preserved the robust squared-distance SQL strategy for nearby unknown-planet search while moving to the staged
+  unknown-record model
 
 ---
 
@@ -32,7 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - added `unknown list` to display records from `planets_unknown`
-- added `unknown search <fid> --near <parsecs>` to find known planets near an unknown planet (superseded in `0.9.6` by internal unknown record IDs)
+- added `unknown search <fid> --near <parsecs>` to find known planets near an unknown planet (superseded in `0.9.6` by
+  internal unknown record IDs)
 - added core query helpers for listing unknown planets and resolving nearby known planets from unknown coordinates
 
 ### Changed

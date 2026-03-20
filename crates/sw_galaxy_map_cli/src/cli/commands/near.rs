@@ -41,12 +41,17 @@ pub fn run(
         let y = unknown_planet.y;
         let name = unknown_planet.planet;
 
-        println!("Center: {} (X={:.3}, Y={:.3})", name, x, y);
+        let (origin_x, origin_y) = match (x, y) {
+            (Some(x), Some(y)) => (x, y),
+            _ => anyhow::bail!("Center planet has no coordinates (x/y)."),
+        };
+
+        println!("Center: {} (X={:.3}, Y={:.3})", name, origin_x, origin_y);
         println!("Radius: {:.3} parsecs", r);
         println!("Limit: {}", limit);
         println!();
 
-        near_planets(con, x, y, r, limit)?
+        near_planets(con, origin_x, origin_y, r, limit)?
     } else if let Some(planet_name) = planet {
         let pn = normalize_text(&planet_name);
         let p = match find_planet_for_info(con, &pn)? {
