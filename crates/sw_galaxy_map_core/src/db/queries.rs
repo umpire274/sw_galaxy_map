@@ -6,7 +6,7 @@ use crate::model::{
 pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use sha2::{Digest, Sha256};
 
 const PLANET_SELECT_CANON: &str = r#"
@@ -1745,8 +1745,8 @@ pub fn list_routes(
 #[cfg(test)]
 mod tests {
     use super::{
-        UnknownPlanetUpdate, near_planets, near_planets_excluding_fid, search_planets,
-        update_unknown_planet,
+        near_planets, near_planets_excluding_fid, search_planets, update_unknown_planet,
+        UnknownPlanetUpdate,
     };
     use rusqlite::Connection;
 
