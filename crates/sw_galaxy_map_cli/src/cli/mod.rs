@@ -280,6 +280,11 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
             let mut con = open_db_migrating(cli.db.clone())?;
             commands::route::run(&mut con, cmd)
         }
+
+        args::Commands::Unknown { cmd } => {
+            let con = open_db_migrating(cli.db.clone())?;
+            commands::unknown::run(&con, cmd)
+        }
     }
 }
 
@@ -358,6 +363,7 @@ fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
             println!("  info coruscant");
             println!("  near --planet coruscant -r 50");
             println!("  route show 42");
+            println!("  unknown list");
             println!("Or REPL help: :help\n");
             continue;
         }

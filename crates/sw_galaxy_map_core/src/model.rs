@@ -44,6 +44,7 @@ pub struct NearHit {
 
 #[derive(Debug)]
 pub struct UnknownPlanet {
+    pub fid: i64,
     pub planet: Option<String>,
     pub x: Option<f64>,
     pub y: Option<f64>,

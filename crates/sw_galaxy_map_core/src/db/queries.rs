@@ -114,7 +114,7 @@ pub fn find_planet_for_info(con: &Connection, key_norm: &str) -> Result<Option<P
 pub fn get_unknown_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<UnknownPlanet>> {
     con.query_row(
         r#"
-        SELECT planet, x, y, reason
+        SELECT fid, planet, x, y, reason
         FROM planets_unknown
         WHERE fid = ?1
         LIMIT 1
@@ -122,15 +122,74 @@ pub fn get_unknown_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<Un
         [fid],
         |r| {
             Ok(UnknownPlanet {
-                planet: r.get(0)?,
-                x: r.get(1)?,
-                y: r.get(2)?,
-                reason: r.get(3)?,
+                fid: r.get(0)?,
+                planet: r.get(1)?,
+                x: r.get(2)?,
+                y: r.get(3)?,
+                reason: r.get(4)?,
             })
         },
     )
     .optional()
     .context("Failed to query planets_unknown")
+}
+
+/// Returns all unknown planets ordered by FID.
+pub fn list_unknown_planets(con: &Connection, limit: i64) -> Result<Vec<UnknownPlanet>> {
+    let mut stmt = con
+        .prepare(
+            r#"
+            SELECT fid, planet, x, y, reason
+            FROM planets_unknown
+            ORDER BY fid ASC
+            LIMIT ?1
+            "#,
+        )
+        .context("Failed to prepare planets_unknown list query")?;
+
+    let rows = stmt
+        .query_map([limit], |r| {
+            Ok(UnknownPlanet {
+                fid: r.get(0)?,
+                planet: r.get(1)?,
+                x: r.get(2)?,
+                y: r.get(3)?,
+                reason: r.get(4)?,
+            })
+        })
+        .context("Failed to execute planets_unknown list query")?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(rows)
+}
+
+/// Returns known planets near the given unknown planet FID using squared-distance SQL.
+pub fn near_planets_for_unknown_fid(
+    con: &Connection,
+    unknown_fid: i64,
+    radius: f64,
+    limit: i64,
+) -> Result<(UnknownPlanet, Vec<NearHit>)> {
+    let unknown = get_unknown_planet_by_fid(con, unknown_fid)?
+        .ok_or_else(|| anyhow::anyhow!("No unknown planet found for fid {}", unknown_fid))?;
+
+    let x = unknown.x.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown planet fid {} has no X coordinate (reason: {}).",
+            unknown_fid,
+            unknown.reason.as_deref().unwrap_or("missing_x")
+        )
+    })?;
+    let y = unknown.y.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown planet fid {} has no Y coordinate (reason: {}).",
+            unknown_fid,
+            unknown.reason.as_deref().unwrap_or("missing_y")
+        )
+    })?;
+
+    let rows = near_planets(con, x, y, radius, limit)?;
+    Ok((unknown, rows))
 }
 
 pub fn get_aliases(con: &Connection, fid: i64) -> Result<Vec<AliasRow>> {

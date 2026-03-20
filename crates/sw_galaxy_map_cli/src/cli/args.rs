@@ -102,6 +102,12 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: RouteCmd,
     },
+
+    /// Work with unclassified planets stored in `planets_unknown`
+    Unknown {
+        #[command(subcommand)]
+        cmd: UnknownCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -147,6 +153,30 @@ pub enum DbCommands {
         /// Show what migrations would be applied without executing them
         #[arg(long, action = clap::ArgAction::SetTrue)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum UnknownCmd {
+    /// List planets stored in `planets_unknown`
+    List {
+        /// Max rows (default: 100)
+        #[arg(long, default_value_t = 100)]
+        limit: i64,
+    },
+
+    /// Search known planets near an unknown planet FID
+    Search {
+        /// Unknown planet FID
+        fid: i64,
+
+        /// Radius in parsecs
+        #[arg(long)]
+        near: f64,
+
+        /// Max rows (default: 20)
+        #[arg(long, default_value_t = 20)]
+        limit: i64,
     },
 }
 
