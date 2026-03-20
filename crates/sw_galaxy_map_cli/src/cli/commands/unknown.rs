@@ -16,6 +16,14 @@ fn col_width<T: AsRef<str>>(items: &[T], min: usize) -> usize {
         .max(min)
 }
 
+/// Formats an optional coordinate for CLI output.
+fn fmt_coord(coord: Option<f64>) -> String {
+    match coord {
+        Some(value) => format!("{value:>10.2}"),
+        None => format!("{:>10}", "-"),
+    }
+}
+
 /// Runs unknown-planet commands.
 pub fn run(con: &Connection, cmd: &UnknownCmd) -> Result<()> {
     match cmd {
@@ -58,14 +66,14 @@ pub fn run(con: &Connection, cmd: &UnknownCmd) -> Result<()> {
 
             for p in planets {
                 println!(
-                    "#{:>4} | fid={:<6} | {:<30} | x={:>10.2} | y={:>10.2} | reviewed={} | promoted={}",
+                    "#{:>4} | fid={:<6} | {:<30} | x={} | y={} | reviewed={} | promoted={}",
                     p.id,
                     p.fid
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "-".to_string()),
                     p.planet,
-                    p.x,
-                    p.y,
+                    fmt_coord(p.x),
+                    fmt_coord(p.y),
                     if p.reviewed != 0 { "yes" } else { "no" },
                     if p.promoted != 0 { "yes" } else { "no" },
                 );
@@ -90,9 +98,17 @@ fn run_search(con: &Connection, id: i64, near: f64, limit: i64) -> Result<()> {
         .map(|v| v.to_string())
         .unwrap_or_else(|| "-".to_string());
 
+    let (origin_x, origin_y) = match (unknown.x, unknown.y) {
+        (Some(x), Some(y)) => (x, y),
+        _ => anyhow::bail!(
+            "Unknown planet {} has no coordinates (x/y). Cannot perform proximity search.",
+            unknown.id
+        ),
+    };
+
     println!(
         "Origin: {} (ID={}, FID={}, X={:.3}, Y={:.3})",
-        unknown.planet, unknown.id, origin_fid, unknown.x, unknown.y
+        unknown.planet, unknown.id, origin_fid, origin_x, origin_y
     );
     println!("Radius: {:.3} parsecs", near);
     println!("Limit: {}", limit);
