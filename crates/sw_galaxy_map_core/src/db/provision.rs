@@ -1,6 +1,6 @@
 use crate::utils::normalize::normalize_text;
-use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use anyhow::Result;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -20,6 +20,16 @@ struct SearchRow {
     aliases_norm: Option<String>,
     search_text: String,
     search_norm: String,
+}
+
+/// Represents a skipped planet row to be inserted into `planets_unknown`.
+struct SkippedUnknownRow {
+    fid: Option<i64>,
+    planet: String,
+    planet_norm: String,
+    x: Option<f64>,
+    y: Option<f64>,
+    reason: String,
 }
 
 pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
@@ -103,8 +113,8 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             sector      TEXT,
             system      TEXT,
             grid        TEXT,
-            x           REAL NOT NULL,
-            y           REAL NOT NULL,
+            x           REAL,
+            y           REAL,
             arcgis_hash TEXT,
             deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
             canon       INTEGER,
@@ -142,26 +152,130 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         DROP TABLE IF EXISTS waypoints;
 
         CREATE TABLE waypoints (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL,
-            name_norm  TEXT NOT NULL,
-            x          REAL NOT NULL,
-            y          REAL NOT NULL,
-            kind       TEXT NOT NULL DEFAULT 'manual',
-            note       TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            name_norm   TEXT NOT NULL,
+            x           REAL NOT NULL,
+            y           REAL NOT NULL,
+            kind        TEXT NOT NULL DEFAULT 'manual',
+            fingerprint TEXT NOT NULL DEFAULT '',
+            note        TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_name_norm ON waypoints(name_norm);
         CREATE INDEX IF NOT EXISTS idx_waypoints_xy ON waypoints(x, y);
-
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_fingerprint
+            ON waypoints(fingerprint);
+            
         CREATE TRIGGER IF NOT EXISTS trg_waypoints_updated_at
         AFTER UPDATE ON waypoints
         FOR EACH ROW
         BEGIN
             UPDATE waypoints SET updated_at = datetime('now') WHERE id = OLD.id;
         END;
+
+        -- =========================
+        -- WAYPOINT ↔ PLANETS LINKS
+        -- =========================
+        DROP TABLE IF EXISTS waypoint_planets;
+
+        CREATE TABLE waypoint_planets (
+            waypoint_id  INTEGER NOT NULL,
+            planet_fid   INTEGER NOT NULL,
+            role         TEXT NOT NULL DEFAULT 'via',
+            distance     REAL,
+            PRIMARY KEY (waypoint_id, planet_fid, role),
+            FOREIGN KEY (waypoint_id) REFERENCES waypoints(id) ON DELETE CASCADE,
+            FOREIGN KEY (planet_fid) REFERENCES planets(FID) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_planet ON waypoint_planets(planet_fid);
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_waypoint ON waypoint_planets(waypoint_id);
+        CREATE INDEX IF NOT EXISTS idx_wp_planets_role ON waypoint_planets(role);
+
+        -- =========================
+        -- ROUTES (computed runs)
+        -- =========================
+        DROP TABLE IF EXISTS route_detours;
+        DROP TABLE IF EXISTS route_waypoints;
+        DROP TABLE IF EXISTS routes;
+
+        CREATE TABLE routes (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_planet_fid INTEGER NOT NULL,
+          to_planet_fid   INTEGER NOT NULL,
+          algo_version    TEXT NOT NULL,
+          options_json    TEXT NOT NULL,
+          length          REAL,
+          iterations      INTEGER,
+          status          TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok','failed')),
+          error           TEXT,
+          created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at      TEXT,
+          FOREIGN KEY(from_planet_fid) REFERENCES planets(FID),
+          FOREIGN KEY(to_planet_fid)   REFERENCES planets(FID)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_routes_from_to
+          ON routes(from_planet_fid, to_planet_fid, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_routes_from_to
+          ON routes(from_planet_fid, to_planet_fid);
+        CREATE INDEX IF NOT EXISTS idx_routes_status
+          ON routes(status);
+
+        -- =========================
+        -- ROUTE WAYPOINTS (polyline)
+        -- =========================
+        CREATE TABLE route_waypoints (
+          route_id     INTEGER NOT NULL,
+          seq          INTEGER NOT NULL,
+          x            REAL NOT NULL,
+          y            REAL NOT NULL,
+          waypoint_id  INTEGER,
+          PRIMARY KEY(route_id, seq),
+          FOREIGN KEY(route_id) REFERENCES routes(id) ON DELETE CASCADE,
+          FOREIGN KEY(waypoint_id) REFERENCES waypoints(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_route_waypoints_route
+          ON route_waypoints(route_id);
+
+        -- =========================
+        -- ROUTE DETOURS (decisions + score)
+        -- =========================
+        CREATE TABLE route_detours (
+          route_id          INTEGER NOT NULL,
+          idx               INTEGER NOT NULL,
+          iteration         INTEGER NOT NULL,
+          segment_index     INTEGER NOT NULL,
+          obstacle_id       INTEGER NOT NULL,
+          obstacle_x        REAL NOT NULL,
+          obstacle_y        REAL NOT NULL,
+          obstacle_radius   REAL NOT NULL,
+          closest_t         REAL NOT NULL,
+          closest_qx        REAL NOT NULL,
+          closest_qy        REAL NOT NULL,
+          closest_dist      REAL NOT NULL,
+          offset_used       REAL NOT NULL,
+          wp_x              REAL NOT NULL,
+          wp_y              REAL NOT NULL,
+          waypoint_id       INTEGER,
+          score_base        REAL NOT NULL,
+          score_turn        REAL NOT NULL,
+          score_back        REAL NOT NULL,
+          score_proximity   REAL NOT NULL,
+          score_total       REAL NOT NULL,
+          tries_used        INTEGER,
+          tries_exhausted   INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(route_id, idx),
+          FOREIGN KEY(route_id) REFERENCES routes(id) ON DELETE CASCADE,
+          FOREIGN KEY(waypoint_id) REFERENCES waypoints(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_route_detours_route
+          ON route_detours(route_id);
 
         -- =========================
         -- ALIASES (N per planet)
@@ -173,7 +287,7 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             planet_fid  INTEGER NOT NULL,
             alias       TEXT NOT NULL,
             alias_norm  TEXT NOT NULL,
-            source      TEXT, -- name0/name1/name2/manual
+            source      TEXT,
             UNIQUE(planet_fid, alias_norm),
             FOREIGN KEY (planet_fid) REFERENCES planets(FID) ON DELETE CASCADE
         );
@@ -190,10 +304,10 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             planet_fid    INTEGER PRIMARY KEY,
             planet        TEXT NOT NULL,
             planet_norm   TEXT NOT NULL,
-            aliases       TEXT,          -- alias raw concatenati
-            aliases_norm  TEXT,          -- alias norm concatenati
-            search_text   TEXT NOT NULL, -- raw lower (debug/LIKE)
-            search_norm   TEXT NOT NULL, -- normalizzato (preferibile)
+            aliases       TEXT,
+            aliases_norm  TEXT,
+            search_text   TEXT NOT NULL,
+            search_norm   TEXT NOT NULL,
             FOREIGN KEY (planet_fid) REFERENCES planets(FID) ON DELETE CASCADE
         );
 
@@ -242,7 +356,6 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             "#,
         )?;
     } else {
-        // Ensure a clean state if FTS isn't available
         con.execute_batch("DROP TABLE IF EXISTS planets_fts;")?;
     }
 
@@ -305,8 +418,6 @@ fn build_search_row(tx: &Transaction<'_>, fid: i64) -> Result<Option<SearchRow>>
 }
 
 fn compute_arcgis_hash(a: &Value) -> String {
-    // Build a canonical JSON string by extracting fields in a fixed order.
-    // This avoids hash changes due to map ordering or unrelated ArcGIS properties.
     let keys = [
         "FID",
         "Planet",
@@ -335,10 +446,6 @@ fn compute_arcgis_hash(a: &Value) -> String {
         s.push_str(k);
         s.push('=');
 
-        // Normalize values:
-        // - null/missing -> empty
-        // - strings -> trimmed
-        // - numbers -> stable string
         match a.get(k) {
             None | Some(Value::Null) => {}
             Some(Value::String(v)) => s.push_str(v.trim()),
@@ -420,6 +527,8 @@ pub fn insert_all(
     meta_upsert(&tx, "fts_enabled", if enable_fts { "1" } else { "0" })?;
     meta_upsert(&tx, "schema_version", "12")?;
 
+    let mut skipped_rows: Vec<SkippedUnknownRow> = Vec::new();
+
     {
         let mut stmt = tx.prepare(
             r#"
@@ -449,25 +558,53 @@ pub fn insert_all(
         )?;
 
         for a in rows {
-            let fid = a
-                .get("FID")
-                .and_then(|v| v.as_i64())
-                .context("Missing FID")?;
-
+            let fid = a.get("FID").and_then(|v| v.as_i64());
             let planet = a
                 .get("Planet")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .trim()
                 .to_string();
+            let x = a.get("X").and_then(|v| v.as_f64());
+            let y = a.get("Y").and_then(|v| v.as_f64());
 
-            let x = a.get("X").and_then(|v| v.as_f64()).context("Missing X")?;
-            let y = a.get("Y").and_then(|v| v.as_f64()).context("Missing Y")?;
-
+            let mut reasons = Vec::new();
+            if fid.is_none() {
+                reasons.push("missing_fid");
+            }
             if planet.is_empty() {
+                reasons.push("missing_planet");
+            }
+            if x.is_none() {
+                reasons.push("missing_x");
+            }
+            if y.is_none() {
+                reasons.push("missing_y");
+            }
+
+            if !reasons.is_empty() {
+                let safe_planet = if planet.is_empty() {
+                    "(unknown)".to_string()
+                } else {
+                    planet.clone()
+                };
+                let planet_norm = normalize_text(&safe_planet);
+
+                skipped_rows.push(SkippedUnknownRow {
+                    fid,
+                    planet: safe_planet,
+                    planet_norm,
+                    x,
+                    y,
+                    reason: reasons.join(","),
+                });
+
                 continue;
             }
 
+            let fid = fid.expect("validated fid");
+            let x = x.expect("validated x");
+            let y = y.expect("validated y");
             let planet_norm = normalize_text(&planet);
 
             let get_s = |k: &str| a.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -509,9 +646,28 @@ pub fn insert_all(
                 }
             }
         }
-    } // stmt dropped
+    }
 
-    // Build denormalized search table (planet_search)
+    if !skipped_rows.is_empty() {
+        let mut stmt_unknown = tx.prepare(
+            r#"
+            INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )?;
+
+        for row in skipped_rows {
+            stmt_unknown.execute(params![
+                row.fid,
+                row.planet,
+                row.planet_norm,
+                row.x,
+                row.y,
+                row.reason
+            ])?;
+        }
+    }
+
     rebuild_planet_search(&tx)?;
     if enable_fts {
         rebuild_planets_fts(&tx)?;
@@ -522,8 +678,6 @@ pub fn insert_all(
 }
 
 pub fn has_fts5(con: &Connection) -> bool {
-    // Best-effort detection: try to create a tiny FTS5 virtual table.
-    // If the SQLite build lacks FTS5, this will error.
     let ddl = r#"
         CREATE VIRTUAL TABLE IF NOT EXISTS __fts5_test USING fts5(x);
         DROP TABLE __fts5_test;
@@ -533,8 +687,6 @@ pub fn has_fts5(con: &Connection) -> bool {
 }
 
 fn rebuild_planets_fts(tx: &Transaction<'_>) -> Result<()> {
-    // If the table doesn't exist, this will error.
-    // We'll call it only when enable_fts == true.
     tx.execute("DELETE FROM planets_fts", [])?;
     tx.execute(
         r#"

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.9] - 2026-03-21
+
+### ✨ Added
+
+- Added X and Y coordinates to `search` command output (tabular view)
+- Improved CLI table formatting with dynamic column widths for coordinates
+
+### 🐛 Fixed
+
+- Fixed `Invalid column index` error in `search` due to mismatched SQL mapping
+- Fixed missing `waypoints.fingerprint` column causing `route compute` failure
+- Fixed missing route-related tables (`routes`, `route_waypoints`, `route_detours`) in `db init`
+- Fixed initial database provisioning not populating `planets_unknown`
+- Fixed mismatch between fresh schema (`db init`) and migrated schema
+
+### 🔄 Improved
+
+- Refactored `db_update` to preserve `planets_unknown` internal IDs (no full rebuild)
+- Improved handling of unknown planets with missing data (`fid`, `x`, `y`)
+- Improved robustness of CLI commands with incomplete or malformed records
+
+### 🧩 Internal
+
+- Reduced type complexity in `provision.rs` using dedicated struct (`SkippedUnknownRow`)
+- Aligned Rust models with DB schema (nullable fields support)
+- Improved consistency between provisioning, migrations, and runtime schema
+
+---
+
 ## [0.9.7] - 2026-03-20
 
 ### 🐛 Fixed
