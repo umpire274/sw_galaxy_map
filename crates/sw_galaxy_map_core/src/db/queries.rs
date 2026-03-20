@@ -319,6 +319,15 @@ pub fn search_planets(
     query_norm: &str,
     limit: i64,
 ) -> Result<Vec<PlanetSearchRow>> {
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+
+    let query_norm = query_norm.trim();
+    if query_norm.is_empty() {
+        return Ok(Vec::new());
+    }
+
     if has_table(con, "planets_fts")? {
         return search_planets_fts(con, query_norm, limit);
     }
@@ -405,6 +414,16 @@ fn search_planets_fts(
 }
 
 pub fn near_planets(con: &Connection, x: f64, y: f64, r: f64, limit: i64) -> Result<Vec<NearHit>> {
+    if !x.is_finite() || !y.is_finite() {
+        anyhow::bail!("Center coordinates must be finite numbers");
+    }
+    if !r.is_finite() || r < 0.0 {
+        anyhow::bail!("Radius must be a finite number >= 0");
+    }
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+
     let r2 = r * r;
 
     let mut stmt = con.prepare(
@@ -446,6 +465,16 @@ pub fn near_planets_excluding_fid(
     r: f64,
     limit: i64,
 ) -> Result<Vec<NearHit>> {
+    if !x.is_finite() || !y.is_finite() {
+        anyhow::bail!("Center coordinates must be finite numbers");
+    }
+    if !r.is_finite() || r < 0.0 {
+        anyhow::bail!("Radius must be a finite number >= 0");
+    }
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+
     let r2 = r * r;
 
     let mut stmt = con.prepare(
@@ -1621,4 +1650,91 @@ pub fn list_routes(
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok((rows, total))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{near_planets, near_planets_excluding_fid, search_planets};
+    use rusqlite::Connection;
+
+    fn setup_search_db() -> Connection {
+        let con = Connection::open_in_memory().expect("in-memory sqlite");
+        con.execute_batch(
+            r#"
+            CREATE TABLE planets (
+                FID INTEGER PRIMARY KEY,
+                Planet TEXT NOT NULL,
+                Region TEXT,
+                Sector TEXT,
+                System TEXT,
+                Grid TEXT,
+                X REAL NOT NULL,
+                Y REAL NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE planet_search (
+                planet_fid INTEGER NOT NULL,
+                search_norm TEXT NOT NULL
+            );
+            INSERT INTO planets (FID, Planet, Region, Sector, System, Grid, X, Y, deleted) VALUES
+                (1, 'Alderaan', 'Core Worlds', 'Alderaan', 'Alderaan', 'L-4', 10.0, 10.0, 0),
+                (2, 'Tatooine', 'Outer Rim', 'Arkanis', 'Tatoo', 'R-16', 20.0, 25.0, 0),
+                (3, 'Deleted', 'Unknown', NULL, NULL, NULL, 50.0, 50.0, 1);
+            INSERT INTO planet_search (planet_fid, search_norm) VALUES
+                (1, 'alderaan house organa'),
+                (2, 'tatooine luke skywalker'),
+                (3, 'deleted hidden');
+            "#,
+        )
+        .expect("schema setup");
+        con
+    }
+
+    #[test]
+    fn search_planets_ignores_empty_query_and_non_positive_limit() {
+        let con = setup_search_db();
+
+        assert!(
+            search_planets(&con, "", 10)
+                .expect("empty query")
+                .is_empty()
+        );
+        assert!(
+            search_planets(&con, "   ", 10)
+                .expect("blank query")
+                .is_empty()
+        );
+        assert!(
+            search_planets(&con, "alderaan", 0)
+                .expect("zero limit")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn near_planets_validates_inputs_and_filters_results() {
+        let con = setup_search_db();
+
+        let rows = near_planets(&con, 9.0, 9.0, 2.0, 10).expect("near query");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].planet, "Alderaan");
+
+        assert!(near_planets(&con, 0.0, 0.0, -1.0, 10).is_err());
+        assert!(near_planets(&con, f64::NAN, 0.0, 1.0, 10).is_err());
+        assert!(
+            near_planets(&con, 0.0, 0.0, 1.0, 0)
+                .expect("zero limit")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn near_planets_excluding_fid_excludes_origin_planet() {
+        let con = setup_search_db();
+
+        let rows =
+            near_planets_excluding_fid(&con, 1, 10.0, 10.0, 30.0, 10).expect("excluding fid");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].planet, "Tatooine");
+    }
 }
