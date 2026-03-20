@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.5] - 2026-03-20
+
+### Added
+
+- Added `unknown list` command to display entries from the `planets_unknown` table
+- Added `unknown search <id> --near <parsecs>` to find known planets near an unknown planet
+- Added optional result limiting for nearby unknown search output
+
+### Changed
+
+- Implemented nearby planet lookup using a robust squared-distance SQL query based on `x` and `y` coordinates from
+  `planets_unknown`
+- Sorted nearby search results by ascending distance for clearer exploration workflows
+
+### Fixed
+
+- Kept Windows GUI executable icon embedding in the correct GUI crate build pipeline
+
+---
+
 ## [0.9.2] - 2026-03-20
 
 ### 🎨 Improvements

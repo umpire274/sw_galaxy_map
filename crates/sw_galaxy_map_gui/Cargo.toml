@@ -31,6 +31,5 @@ sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
 sw_galaxy_map_cli = { path = "../sw_galaxy_map_cli" }
 
 
-
-[target."cfg(windows)".build-dependencies]
+[target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
