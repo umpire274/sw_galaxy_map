@@ -41,6 +41,31 @@ The two frontends are now fully separated:
 - `cargo run -p sw_galaxy_map_cli` starts only the CLI
 - `cargo run -p sw_galaxy_map_gui` starts only the GUI
 
+## Unknown planets staging workflow
+
+Version `0.9.6` evolves `planets_unknown` from a minimal skipped-rows bucket into a staging table aligned with the main `planets` schema.
+
+The table now includes:
+
+- an internal `id` primary key for stable editing workflows,
+- `planet_norm` for normalized matching,
+- structural fields mirroring `planets` (`region`, `sector`, `system`, `grid`, `canon`, `legends`, `status`, `ref`, ...),
+- workflow flags such as `reviewed` and `promoted`,
+- free-form `notes` for future manual curation.
+
+Current CLI support includes:
+
+```bash
+cargo run -p sw_galaxy_map_cli -- unknown search 42 --near 1500
+cargo run -p sw_galaxy_map_cli -- unknown list
+cargo run -p sw_galaxy_map_cli -- unknown list --page 2
+cargo run -p sw_galaxy_map_cli -- unknown list --page 2 --page-size 50
+```
+
+`unknown list` now shows the internal unknown `ID` together with the source `FID`, making the table ready for future commands such as `unknown show <id>` and `unknown edit <id>`.
+
+---
+
 ## Acknowledgements
 
 The planetary data used by this project were obtained from the **Star Wars Galaxy Map**

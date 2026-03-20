@@ -160,15 +160,19 @@ pub enum DbCommands {
 pub enum UnknownCmd {
     /// List planets stored in `planets_unknown`
     List {
-        /// Max rows (default: 100)
-        #[arg(long, default_value_t = 100)]
-        limit: i64,
+        /// Page number (starting from 1).
+        #[arg(long, default_value_t = 1)]
+        page: usize,
+
+        /// Number of items per page.
+        #[arg(long = "page-size", default_value_t = 25)]
+        page_size: usize,
     },
 
-    /// Search known planets near an unknown planet FID
+    /// Search known planets near an unknown planet record
     Search {
-        /// Unknown planet FID
-        fid: i64,
+        /// Internal unknown record ID
+        id: i64,
 
         /// Radius in parsecs
         #[arg(long)]

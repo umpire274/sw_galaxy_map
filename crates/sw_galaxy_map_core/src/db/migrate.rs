@@ -18,7 +18,7 @@ pub struct MigrationReport {
 }
 
 const START_SCHEMA_VERSION: i64 = 3;
-const LATEST_SCHEMA_VERSION: i64 = 11;
+const LATEST_SCHEMA_VERSION: i64 = 12;
 
 struct MigrationStep {
     from: i64,
@@ -76,6 +76,12 @@ fn migration_steps() -> &'static [MigrationStep] {
             to: 11,
             label: "planets unknown table",
             apply: m_to_v11,
+        },
+        MigrationStep {
+            from: 11,
+            to: 12,
+            label: "planets unknown staging alignment",
+            apply: m_to_v12,
         },
     ]
 }
@@ -399,6 +405,86 @@ fn m_to_v11(tx: &Transaction<'_>) -> Result<()> {
         "#,
     )
     .context("Failed to migrate schema to v11 (create planets_unknown table)")?;
+
+    Ok(())
+}
+
+fn m_to_v12(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE planets_unknown RENAME TO planets_unknown_old;
+
+        CREATE TABLE planets_unknown (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            fid         INTEGER,
+            planet      TEXT NOT NULL,
+            planet_norm TEXT NOT NULL,
+            region      TEXT,
+            sector      TEXT,
+            system      TEXT,
+            grid        TEXT,
+            x           REAL NOT NULL,
+            y           REAL NOT NULL,
+            arcgis_hash TEXT,
+            deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
+            canon       INTEGER,
+            legends     INTEGER,
+            zm          INTEGER,
+            name0       TEXT,
+            name1       TEXT,
+            name2       TEXT,
+            lat         REAL,
+            long        REAL,
+            ref         TEXT,
+            status      TEXT,
+            cregion     TEXT,
+            cregion_li  TEXT,
+            reason      TEXT,
+            reviewed    INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0,1)),
+            promoted    INTEGER NOT NULL DEFAULT 0 CHECK (promoted IN (0,1)),
+            notes       TEXT,
+            CHECK (canon IS NULL OR canon IN (0,1)),
+            CHECK (legends IS NULL OR legends IN (0,1))
+        );
+
+        INSERT INTO planets_unknown (
+            fid,
+            planet,
+            planet_norm,
+            x,
+            y,
+            reason
+        )
+        SELECT
+            fid,
+            COALESCE(NULLIF(TRIM(planet), ''), '(unknown)'),
+            LOWER(TRIM(COALESCE(planet, '(unknown)'))),
+            x,
+            y,
+            reason
+        FROM planets_unknown_old;
+
+        DROP TABLE planets_unknown_old;
+
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_fid
+          ON planets_unknown(fid);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_planet
+          ON planets_unknown(planet);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_planet_norm
+          ON planets_unknown(planet_norm);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_sector
+          ON planets_unknown(sector);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_system
+          ON planets_unknown(system);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_xy
+          ON planets_unknown(x, y);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_reviewed
+          ON planets_unknown(reviewed);
+        CREATE INDEX IF NOT EXISTS idx_planets_unknown_promoted
+          ON planets_unknown(promoted);
+        "#,
+    )
+    .context("Failed to migrate schema to v12 (align planets_unknown with planets)")?;
 
     Ok(())
 }

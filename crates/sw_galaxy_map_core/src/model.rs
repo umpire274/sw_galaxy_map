@@ -42,13 +42,36 @@ pub struct NearHit {
     pub distance: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnknownPlanet {
-    pub fid: i64,
-    pub planet: Option<String>,
-    pub x: Option<f64>,
-    pub y: Option<f64>,
+    pub id: i64,
+    pub fid: Option<i64>,
+    pub planet: String,
+    pub planet_norm: String,
+    pub region: Option<String>,
+    pub sector: Option<String>,
+    pub system: Option<String>,
+    pub grid: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub arcgis_hash: Option<String>,
+    pub deleted: i64,
+    pub canon: Option<i64>,
+    pub legends: Option<i64>,
+    pub zm: Option<i64>,
+    pub name0: Option<String>,
+    pub name1: Option<String>,
+    pub name2: Option<String>,
+    pub lat: Option<f64>,
+    pub long: Option<f64>,
+    pub reference: Option<String>,
+    pub status: Option<String>,
+    pub c_region: Option<String>,
+    pub c_region_li: Option<String>,
     pub reason: Option<String>,
+    pub reviewed: i64,
+    pub promoted: i64,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug)]

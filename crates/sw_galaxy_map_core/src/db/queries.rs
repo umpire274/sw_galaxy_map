@@ -33,6 +33,70 @@ const PLANET_SELECT_CANON: &str = r#"
   p.CRegion_li  AS c_region_li
 "#;
 
+const UNKNOWN_PLANET_SELECT: &str = r#"
+  u.id          AS id,
+  u.fid         AS fid,
+  u.planet      AS planet,
+  u.planet_norm AS planet_norm,
+  u.region      AS region,
+  u.sector      AS sector,
+  u.system      AS system,
+  u.grid        AS grid,
+  u.x           AS x,
+  u.y           AS y,
+  u.arcgis_hash AS arcgis_hash,
+  u.deleted     AS deleted,
+  u.canon       AS canon,
+  u.legends     AS legends,
+  u.zm          AS zm,
+  u.name0       AS name0,
+  u.name1       AS name1,
+  u.name2       AS name2,
+  u.lat         AS lat,
+  u.long        AS long,
+  u.ref         AS reference,
+  u.status      AS status,
+  u.cregion     AS c_region,
+  u.cregion_li  AS c_region_li,
+  u.reason      AS reason,
+  u.reviewed    AS reviewed,
+  u.promoted    AS promoted,
+  u.notes       AS notes
+"#;
+
+fn unknown_planet_from_row(r: &Row<'_>) -> rusqlite::Result<UnknownPlanet> {
+    Ok(UnknownPlanet {
+        id: r.get("id")?,
+        fid: r.get("fid")?,
+        planet: r.get("planet")?,
+        planet_norm: r.get("planet_norm")?,
+        region: r.get("region")?,
+        sector: r.get("sector")?,
+        system: r.get("system")?,
+        grid: r.get("grid")?,
+        x: r.get("x")?,
+        y: r.get("y")?,
+        arcgis_hash: r.get("arcgis_hash")?,
+        deleted: r.get("deleted")?,
+        canon: r.get("canon")?,
+        legends: r.get("legends")?,
+        zm: r.get("zm")?,
+        name0: r.get("name0")?,
+        name1: r.get("name1")?,
+        name2: r.get("name2")?,
+        lat: r.get("lat")?,
+        long: r.get("long")?,
+        reference: r.get("reference")?,
+        status: r.get("status")?,
+        c_region: r.get("c_region")?,
+        c_region_li: r.get("c_region_li")?,
+        reason: r.get("reason")?,
+        reviewed: r.get("reviewed")?,
+        promoted: r.get("promoted")?,
+        notes: r.get("notes")?,
+    })
+}
+
 const ROUTE_SELECT: &str = r#"
   r.id             AS id,
   r.from_planet_fid AS from_planet_fid,
@@ -111,84 +175,113 @@ pub fn find_planet_for_info(con: &Connection, key_norm: &str) -> Result<Option<P
     find_planet_by_alias_norm(con, key_norm)
 }
 
-pub fn get_unknown_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<UnknownPlanet>> {
-    con.query_row(
+pub fn get_unknown_planet_by_id(con: &Connection, id: i64) -> Result<Option<UnknownPlanet>> {
+    let sql = format!(
         r#"
-        SELECT fid, planet, x, y, reason
-        FROM planets_unknown
-        WHERE fid = ?1
+        SELECT
+          {select}
+        FROM planets_unknown u
+        WHERE u.id = ?1
         LIMIT 1
         "#,
-        [fid],
-        |r| {
-            Ok(UnknownPlanet {
-                fid: r.get(0)?,
-                planet: r.get(1)?,
-                x: r.get(2)?,
-                y: r.get(3)?,
-                reason: r.get(4)?,
-            })
-        },
-    )
-    .optional()
-    .context("Failed to query planets_unknown")
+        select = UNKNOWN_PLANET_SELECT
+    );
+
+    let mut stmt = con.prepare(&sql)?;
+    let planet = stmt
+        .query_row([id], unknown_planet_from_row)
+        .optional()
+        .context("Failed to query planets_unknown by id")?;
+    Ok(planet)
 }
 
-/// Returns all unknown planets ordered by FID.
-pub fn list_unknown_planets(con: &Connection, limit: i64) -> Result<Vec<UnknownPlanet>> {
-    let mut stmt = con
-        .prepare(
-            r#"
-            SELECT fid, planet, x, y, reason
-            FROM planets_unknown
-            ORDER BY fid ASC
-            LIMIT ?1
-            "#,
-        )
-        .context("Failed to prepare planets_unknown list query")?;
+pub fn get_unknown_planet_by_fid(con: &Connection, fid: i64) -> Result<Option<UnknownPlanet>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {select}
+        FROM planets_unknown u
+        WHERE u.fid = ?1
+        ORDER BY u.id
+        LIMIT 1
+        "#,
+        select = UNKNOWN_PLANET_SELECT
+    );
 
-    let rows = stmt
-        .query_map([limit], |r| {
-            Ok(UnknownPlanet {
-                fid: r.get(0)?,
-                planet: r.get(1)?,
-                x: r.get(2)?,
-                y: r.get(3)?,
-                reason: r.get(4)?,
-            })
-        })
-        .context("Failed to execute planets_unknown list query")?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-
-    Ok(rows)
+    let mut stmt = con.prepare(&sql)?;
+    let planet = stmt
+        .query_row([fid], unknown_planet_from_row)
+        .optional()
+        .context("Failed to query planets_unknown by fid")?;
+    Ok(planet)
 }
 
-/// Returns known planets near the given unknown planet FID using squared-distance SQL.
-pub fn near_planets_for_unknown_fid(
+/// Returns all unknown planets ordered by internal id.
+/// Returns all unknown planets.
+pub fn list_unknown_planets(conn: &Connection) -> rusqlite::Result<Vec<UnknownPlanet>> {
+    let sql = format!(
+        r#"
+        SELECT
+          {}
+        FROM planets_unknown u
+        ORDER BY u.id
+        "#,
+        UNKNOWN_PLANET_SELECT
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], unknown_planet_from_row)?;
+
+    rows.collect()
+}
+
+/// Returns the total number of unknown planets.
+pub fn count_unknown_planets(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM planets_unknown u", [], |row| {
+        row.get::<_, i64>(0)
+    })
+}
+
+/// Returns a paginated list of unknown planets.
+pub fn list_unknown_planets_paginated(
+    conn: &Connection,
+    page: usize,
+    page_size: usize,
+) -> rusqlite::Result<Vec<UnknownPlanet>> {
+    let safe_page = page.max(1);
+    let safe_page_size = page_size.max(1);
+
+    let offset = ((safe_page - 1) * safe_page_size) as i64;
+    let limit = safe_page_size as i64;
+
+    let sql = format!(
+        r#"
+        SELECT
+          {}
+        FROM planets_unknown u
+        ORDER BY u.id
+        LIMIT ?1 OFFSET ?2
+        "#,
+        UNKNOWN_PLANET_SELECT
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([limit, offset], unknown_planet_from_row)?;
+
+    rows.collect()
+}
+
+/// Returns known planets near the given unknown planet id using squared-distance SQL.
+pub fn near_planets_for_unknown_id(
     con: &Connection,
-    unknown_fid: i64,
+    unknown_id: i64,
     radius: f64,
     limit: i64,
 ) -> Result<(UnknownPlanet, Vec<NearHit>)> {
-    let unknown = get_unknown_planet_by_fid(con, unknown_fid)?
-        .ok_or_else(|| anyhow::anyhow!("No unknown planet found for fid {}", unknown_fid))?;
+    let unknown = get_unknown_planet_by_id(con, unknown_id)?
+        .ok_or_else(|| anyhow::anyhow!("No unknown planet found for id {}", unknown_id))?;
 
-    let x = unknown.x.ok_or_else(|| {
-        anyhow::anyhow!(
-            "Unknown planet fid {} has no X coordinate (reason: {}).",
-            unknown_fid,
-            unknown.reason.as_deref().unwrap_or("missing_x")
-        )
-    })?;
-    let y = unknown.y.ok_or_else(|| {
-        anyhow::anyhow!(
-            "Unknown planet fid {} has no Y coordinate (reason: {}).",
-            unknown_fid,
-            unknown.reason.as_deref().unwrap_or("missing_y")
-        )
-    })?;
-
-    let rows = near_planets(con, x, y, radius, limit)?;
+    let rows = near_planets(con, unknown.x, unknown.y, radius, limit)?;
     Ok((unknown, rows))
 }
 
