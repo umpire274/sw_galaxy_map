@@ -497,29 +497,7 @@ pub fn run(
         meta_upsert_public(&tx, "update_mode", "incremental")?;
         meta_upsert_public(&tx, "prune_used", if prune { "1" } else { "0" })?;
 
-        tx.execute("DELETE FROM planets_unknown", [])?;
-        let mut stmt = tx.prepare_cached(
-            r#"
-            INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-        )?;
-        for row in &skipped_rows {
-            let planet = row
-                .planet
-                .clone()
-                .unwrap_or_else(|| "(unknown)".to_string());
-            let planet_norm = normalize_text(&planet);
-            stmt.execute(params![
-                row.fid,
-                planet,
-                planet_norm,
-                row.x,
-                row.y,
-                row.reason
-            ])?;
-        }
-        drop(stmt);
+        sync_unknown_planets(&tx, &skipped_rows)?;
 
         tx.commit().context("Failed to commit db update")?;
     } else {
@@ -646,4 +624,150 @@ fn count_missing_active_planets(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) 
 
     tx.execute_batch("DROP TABLE IF EXISTS __keep_fids;")?;
     Ok(n)
+}
+
+fn skipped_row_planet_and_norm(row: &SkippedPlanetRow) -> (String, String) {
+    let planet = row
+        .planet
+        .clone()
+        .unwrap_or_else(|| "(unknown)".to_string());
+    let planet_norm = normalize_text(&planet);
+    (planet, planet_norm)
+}
+
+fn unknown_seen_key(
+    fid: Option<i64>,
+    planet_norm: &str,
+    x: Option<f64>,
+    y: Option<f64>,
+    reason: &str,
+) -> String {
+    match fid {
+        Some(fid) => format!("fid:{fid}"),
+        None => format!(
+            "syn:{}|{}|{}|{}",
+            planet_norm,
+            coord_key(x),
+            coord_key(y),
+            reason.trim()
+        ),
+    }
+}
+
+fn coord_key(v: Option<f64>) -> String {
+    match v {
+        Some(v) => format!("{v:.12}"),
+        None => "NULL".to_string(),
+    }
+}
+
+fn sync_unknown_planets(tx: &Transaction<'_>, skipped_rows: &[SkippedPlanetRow]) -> Result<()> {
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS __unknown_seen_keys;
+         CREATE TEMP TABLE __unknown_seen_keys(seen_key TEXT PRIMARY KEY);",
+    )?;
+
+    let mut mark_seen =
+        tx.prepare_cached("INSERT OR IGNORE INTO __unknown_seen_keys(seen_key) VALUES (?1)")?;
+
+    let mut find_by_fid = tx.prepare_cached(
+        r#"
+        SELECT id
+        FROM planets_unknown
+        WHERE fid = ?1
+        LIMIT 1
+        "#,
+    )?;
+
+    let mut find_by_synthetic = tx.prepare_cached(
+        r#"
+        SELECT id
+        FROM planets_unknown
+        WHERE fid IS NULL
+          AND planet_norm = ?1
+          AND ((x = ?2) OR (x IS NULL AND ?2 IS NULL))
+          AND ((y = ?3) OR (y IS NULL AND ?3 IS NULL))
+          AND reason = ?4
+        LIMIT 1
+        "#,
+    )?;
+
+    let mut update_existing = tx.prepare_cached(
+        r#"
+        UPDATE planets_unknown
+        SET
+            fid = ?1,
+            planet = ?2,
+            planet_norm = ?3,
+            x = ?4,
+            y = ?5,
+            reason = ?6
+        WHERE id = ?7
+        "#,
+    )?;
+
+    let mut insert_new = tx.prepare_cached(
+        r#"
+        INSERT INTO planets_unknown(fid, planet, planet_norm, x, y, reason)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+    )?;
+
+    for row in skipped_rows {
+        let (planet, planet_norm) = skipped_row_planet_and_norm(row);
+        let seen_key = unknown_seen_key(row.fid, &planet_norm, row.x, row.y, &row.reason);
+
+        let existing_id: Option<i64> = match row.fid {
+            Some(fid) => find_by_fid.query_row([fid], |r| r.get(0)).optional()?,
+            None => find_by_synthetic
+                .query_row(params![planet_norm, row.x, row.y, row.reason], |r| r.get(0))
+                .optional()?,
+        };
+
+        if let Some(id) = existing_id {
+            update_existing.execute(params![
+                row.fid,
+                planet,
+                planet_norm,
+                row.x,
+                row.y,
+                row.reason,
+                id
+            ])?;
+        } else {
+            insert_new.execute(params![
+                row.fid,
+                planet,
+                planet_norm,
+                row.x,
+                row.y,
+                row.reason
+            ])?;
+        }
+
+        mark_seen.execute([seen_key])?;
+    }
+
+    drop(mark_seen);
+    drop(find_by_fid);
+    drop(find_by_synthetic);
+    drop(update_existing);
+    drop(insert_new);
+
+    tx.execute(
+        r#"
+        DELETE FROM planets_unknown
+        WHERE CASE
+            WHEN fid IS NOT NULL THEN 'fid:' || CAST(fid AS TEXT)
+            ELSE 'syn:' || planet_norm || '|' ||
+                 CASE WHEN x IS NULL THEN 'NULL' ELSE printf('%.12f', x) END || '|' ||
+                 CASE WHEN y IS NULL THEN 'NULL' ELSE printf('%.12f', y) END || '|' ||
+                 reason
+        END NOT IN (SELECT seen_key FROM __unknown_seen_keys)
+        "#,
+        [],
+    )?;
+
+    tx.execute_batch("DROP TABLE IF EXISTS __unknown_seen_keys;")?;
+    Ok(())
 }
