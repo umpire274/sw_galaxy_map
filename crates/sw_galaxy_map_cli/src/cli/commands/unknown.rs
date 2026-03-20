@@ -1,9 +1,10 @@
 use crate::cli::args::UnknownCmd;
-use crate::ui::{info, warning};
+use crate::ui::{info, success, warning};
 use anyhow::Result;
 use rusqlite::Connection;
 use sw_galaxy_map_core::db::queries::{
-    count_unknown_planets, list_unknown_planets_paginated, near_planets_for_unknown_id,
+    UnknownPlanetUpdate, count_unknown_planets, list_unknown_planets_paginated,
+    near_planets_for_unknown_id, update_unknown_planet,
 };
 use sw_galaxy_map_core::validate;
 
@@ -82,6 +83,34 @@ pub fn run(con: &Connection, cmd: &UnknownCmd) -> Result<()> {
             Ok(())
         }
         UnknownCmd::Search { id, near, limit } => run_search(con, *id, *near, *limit),
+        UnknownCmd::Edit {
+            id,
+            planet,
+            region,
+            sector,
+            system,
+            grid,
+            canon,
+            legend,
+            c_region,
+            c_region_li,
+            reviewed,
+            notes,
+        } => run_edit(
+            con,
+            *id,
+            planet.as_deref(),
+            region.as_deref(),
+            sector.as_deref(),
+            system.as_deref(),
+            grid.as_deref(),
+            *canon,
+            *legend,
+            c_region.as_deref(),
+            c_region_li.as_deref(),
+            *reviewed,
+            notes.as_deref(),
+        ),
     }
 }
 
@@ -163,6 +192,88 @@ fn run_search(con: &Connection, id: i64, near: f64, limit: i64) -> Result<()> {
             d = format!("{:.3}", row.distance),
         );
     }
+
+    Ok(())
+}
+
+fn optional_text_update(value: Option<&str>) -> Option<Option<String>> {
+    value.map(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_edit(
+    con: &Connection,
+    id: i64,
+    planet: Option<&str>,
+    region: Option<&str>,
+    sector: Option<&str>,
+    system: Option<&str>,
+    grid: Option<&str>,
+    canon: Option<bool>,
+    legend: Option<bool>,
+    c_region: Option<&str>,
+    c_region_li: Option<&str>,
+    reviewed: Option<bool>,
+    notes: Option<&str>,
+) -> Result<()> {
+    let planet = planet.map(str::trim);
+    if matches!(planet, Some("")) {
+        anyhow::bail!("--planet cannot be empty");
+    }
+
+    let update = UnknownPlanetUpdate {
+        planet: planet.map(str::to_string),
+        region: optional_text_update(region),
+        sector: optional_text_update(sector),
+        system: optional_text_update(system),
+        grid: optional_text_update(grid),
+        canon: canon.map(|v| Some(i64::from(v))),
+        legends: legend.map(|v| Some(i64::from(v))),
+        c_region: optional_text_update(c_region),
+        c_region_li: optional_text_update(c_region_li),
+        reviewed: reviewed.map(i64::from),
+        notes: optional_text_update(notes),
+    };
+
+    let touched = update.planet.is_some()
+        || update.region.is_some()
+        || update.sector.is_some()
+        || update.system.is_some()
+        || update.grid.is_some()
+        || update.canon.is_some()
+        || update.legends.is_some()
+        || update.c_region.is_some()
+        || update.c_region_li.is_some()
+        || update.reviewed.is_some()
+        || update.notes.is_some();
+
+    if !touched {
+        anyhow::bail!("No changes requested. Pass at least one edit flag.");
+    }
+
+    let updated = update_unknown_planet(con, id, &update)?;
+
+    success(format!(
+        "Unknown planet #{} updated: planet='{}', reviewed={}, canon={}, legends={}",
+        updated.id,
+        updated.planet,
+        updated.reviewed,
+        updated
+            .canon
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        updated
+            .legends
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    ));
 
     Ok(())
 }
