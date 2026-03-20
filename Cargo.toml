@@ -7,7 +7,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.9.6"
+version = "0.9.8"
 edition = "2024"
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "Star Wars galaxy explorer and navicomputer with CLI and GUI interfaces, backed by a local SQLite database"
