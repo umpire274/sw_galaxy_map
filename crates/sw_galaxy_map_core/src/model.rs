@@ -291,3 +291,17 @@ pub struct PlanetSearchRow {
     pub x: f64,
     pub y: f64,
 }
+
+/// Represents an unknown planet hit near a known planet.
+#[derive(Debug, Clone)]
+pub struct UnknownNearHit {
+    pub id: i64,
+    pub fid: Option<i64>,
+    pub planet: String,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub reason: Option<String>,
+    pub reviewed: i64,
+    pub promoted: i64,
+    pub distance: f64,
+}

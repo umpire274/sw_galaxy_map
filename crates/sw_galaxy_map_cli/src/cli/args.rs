@@ -183,6 +183,16 @@ pub enum UnknownCmd {
         limit: i64,
     },
 
+    Near {
+        planet: String,
+
+        #[arg(long = "range")]
+        range: f64,
+
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+
     /// Edit an unknown planet record in `planets_unknown`
     Edit {
         /// Internal unknown record ID
