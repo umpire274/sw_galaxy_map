@@ -1,8 +1,5 @@
 use crate::db::has_table;
-use crate::model::{
-    AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, UnknownPlanet,
-    Waypoint, WaypointLinkRow, WaypointListRow, WaypointPlanetLink, WaypointRouteRow,
-};
+use crate::model::{AliasRow, NearHit, Planet, PlanetSearchRow, RouteListRow, RoutingObstacleRow, UnknownNearHit, UnknownPlanet, Waypoint, WaypointLinkRow, WaypointListRow, WaypointPlanetLink, WaypointRouteRow};
 pub(crate) use crate::model::{RouteDetourRow, RouteLoaded, RouteRow, RouteWaypointRow};
 use crate::routing::router::{DetourDecision, Route as ComputedRoute, RouteOptions};
 use anyhow::{Context, Result};
@@ -173,6 +170,54 @@ pub fn find_planet_for_info(con: &Connection, key_norm: &str) -> Result<Option<P
         return Ok(Some(p));
     }
     find_planet_by_alias_norm(con, key_norm)
+}
+
+pub fn near_unknown_planets(
+    con: &Connection,
+    x: f64,
+    y: f64,
+    range: f64,
+    limit: i64,
+) -> rusqlite::Result<Vec<UnknownNearHit>> {
+    let sql = r#"
+        SELECT
+            u.id,
+            u.fid,
+            u.planet,
+            u.x,
+            u.y,
+            u.reason,
+            u.reviewed,
+            u.promoted,
+            (((u.x - ?1) * (u.x - ?1)) +
+             ((u.y - ?2) * (u.y - ?2))) AS distance_sq
+        FROM planets_unknown u
+        WHERE u.x IS NOT NULL
+          AND u.y IS NOT NULL
+          AND (((u.x - ?1) * (u.x - ?1)) +
+               ((u.y - ?2) * (u.y - ?2))) <= (?3 * ?3)
+        ORDER BY distance_sq ASC, u.planet ASC
+        LIMIT ?4
+    "#;
+
+    let mut stmt = con.prepare(sql)?;
+    let rows = stmt.query_map((x, y, range, limit), |r| {
+        let distance_sq: f64 = r.get(8)?;
+
+        Ok(UnknownNearHit {
+            id: r.get(0)?,
+            fid: r.get(1)?,
+            planet: r.get(2)?,
+            x: r.get(3)?,
+            y: r.get(4)?,
+            reason: r.get(5)?,
+            reviewed: r.get(6)?,
+            promoted: r.get(7)?,
+            distance: distance_sq.sqrt(),
+        })
+    })?;
+
+    rows.collect()
 }
 
 pub fn get_unknown_planet_by_id(con: &Connection, id: i64) -> Result<Option<UnknownPlanet>> {
