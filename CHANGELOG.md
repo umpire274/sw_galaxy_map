@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.10] - 2026-03-21
+
+### Added
+
+- Added `unknown near <planet> --range <parsecs>` command to find unknown planets near a known planet
+- Implemented proximity search from `planets.X` / `planets.Y` to `planets_unknown`
+- Added distance-sorted output for nearby unknown planets
+- Added optional result limiting for nearby unknown planet search
+
+### Improved
+
+- Excluded unknown records without coordinates from proximity search
+- Reused robust squared-distance SQL filtering for spatial lookup
+- Improved interoperability between known-planet search and unknown-planet inspection workflows
+
+### Fixed
+
+- Fixed result collection type mismatch in unknown-near query handling
+
+---
+
 ## [0.9.9] - 2026-03-21
 
 ### ✨ Added

@@ -3,8 +3,9 @@ use crate::ui::{info, success, warning};
 use anyhow::Result;
 use rusqlite::Connection;
 use sw_galaxy_map_core::db::queries::{
-    UnknownPlanetUpdate, count_unknown_planets, list_unknown_planets_paginated,
-    near_planets_for_unknown_id, update_unknown_planet,
+    UnknownPlanetUpdate, count_unknown_planets, find_planet_by_norm,
+    list_unknown_planets_paginated, near_planets_for_unknown_id, near_unknown_planets,
+    update_unknown_planet,
 };
 use sw_galaxy_map_core::validate;
 
@@ -83,6 +84,52 @@ pub fn run(con: &Connection, cmd: &UnknownCmd) -> Result<()> {
             Ok(())
         }
         UnknownCmd::Search { id, near, limit } => run_search(con, *id, *near, *limit),
+
+        UnknownCmd::Near {
+            planet,
+            range,
+            limit,
+        } => {
+            if *range <= 0.0 {
+                anyhow::bail!("--range must be greater than 0");
+            }
+
+            let source = find_planet_by_norm(con, planet)?
+                .ok_or_else(|| anyhow::anyhow!("Planet '{}' not found.", planet))?;
+
+            let hits = near_unknown_planets(con, source.x, source.y, *range, *limit as i64)?;
+
+            println!(
+                "Unknown planets near {} (FID={}, X={:.3}, Y={:.3}) within {:.2} parsecs",
+                source.planet, source.fid, source.x, source.y, range
+            );
+            println!();
+
+            if hits.is_empty() {
+                println!("No unknown planets found within the requested range.");
+                return Ok(());
+            }
+
+            for h in hits {
+                println!(
+                    "#{:>4} | fid={:<6} | {:<30} | x={} | y={} | dist={:>8.2} | reason={}",
+                    h.id,
+                    h.fid
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    h.planet,
+                    h.x.map(|v| format!("{v:.2}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    h.y.map(|v| format!("{v:.2}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    h.distance,
+                    h.reason.as_deref().unwrap_or("-"),
+                );
+            }
+
+            Ok(())
+        }
+
         UnknownCmd::Edit {
             id,
             planet,
