@@ -3,14 +3,17 @@ name = "sw_galaxy_map_gui"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description.workspace = true
 license.workspace = true
-readme.workspace = true
-homepage.workspace = true
 repository.workspace = true
+homepage.workspace = true
 documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
+readme.workspace = true
+
+description = "GUI frontend for sw_galaxy_map using egui"
+
+keywords = ["star-wars", "gui", "egui", "sqlite"]
+categories = ["gui"]
+
 include = [
     "src/**",
     "assets/**",
@@ -27,9 +30,9 @@ egui.workspace = true
 rfd.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
-sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
-sw_galaxy_map_cli = { path = "../sw_galaxy_map_cli" }
 
+sw_galaxy_map_core = { version = "0.10.0", path = "../sw_galaxy_map_core" }
+sw_galaxy_map_cli = { version = "0.10.0", path = "../sw_galaxy_map_cli" }
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
