@@ -1,5 +1,11 @@
 # sw_galaxy_map
 
+[![Crates.io](https://img.shields.io/crates/v/sw_galaxy_map_cli.svg)](https://crates.io/crates/sw_galaxy_map_cli)
+[![Downloads](https://img.shields.io/crates/d/sw_galaxy_map_cli.svg)](https://crates.io/crates/sw_galaxy_map_cli)
+[![Docs.rs](https://docs.rs/sw_galaxy_map_core/badge.svg)](https://docs.rs/sw_galaxy_map_core)
+[![License](https://img.shields.io/crates/l/sw_galaxy_map_cli.svg)](https://github.com/umpire274/sw_galaxy_map)
+[![CI](https://github.com/umpire274/sw_galaxy_map/actions/workflows/ci.yml/badge.svg)](https://github.com/umpire274/sw_galaxy_map/actions)
+
 **sw_galaxy_map** is a Rust workspace for exploring the Star Wars galaxy using a local SQLite database, with both CLI
 and GUI frontends.
 
