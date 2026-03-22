@@ -3,14 +3,16 @@ name = "sw_galaxy_map_cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description.workspace = true
 license.workspace = true
-readme.workspace = true
-homepage.workspace = true
 repository.workspace = true
+homepage.workspace = true
 documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
+
+readme = "README.md"
+description = "Command-line interface for sw_galaxy_map"
+
+keywords = ["star-wars", "cli", "sqlite", "routing"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow.workspace = true
@@ -21,8 +23,8 @@ shell-words.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
 
+sw_galaxy_map_core = { version = "0.10.0", path = "../sw_galaxy_map_core" }
 
 [[bin]]
 name = "sw_galaxy_map"

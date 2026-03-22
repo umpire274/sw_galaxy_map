@@ -3,14 +3,16 @@ name = "sw_galaxy_map_core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description.workspace = true
 license.workspace = true
-readme.workspace = true
-homepage.workspace = true
 repository.workspace = true
+homepage.workspace = true
 documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
+
+readme = "README.md"
+description = "Core library for Star Wars galaxy exploration, search, routing, and unknown-planet workflows"
+
+keywords = ["star-wars", "sqlite", "routing", "galaxy"]
+categories = ["database", "algorithms"]
 
 exclude = [
     "/target",
