@@ -7,8 +7,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-readme.workspace = true
 
+readme = "README.md"
 description = "Command-line interface for sw_galaxy_map"
 
 keywords = ["star-wars", "cli", "sqlite", "routing"]
