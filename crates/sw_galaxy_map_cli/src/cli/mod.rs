@@ -2,27 +2,46 @@ pub mod args;
 pub mod color;
 pub mod commands;
 pub mod export;
+pub mod tui;
 
 use crate::ui::{error, info, success, warning};
 use anyhow::Result;
 use clap::Parser;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use std::path::Path;
 use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport, resolve_db_path};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
+use sw_galaxy_map_core::db::queries::search_planets;
+use sw_galaxy_map_core::model::{NearHit, PlanetSearchRow};
+use sw_galaxy_map_core::utils::normalize_text;
 use sw_galaxy_map_core::validate;
+
+#[derive(Debug, Clone)]
+pub(crate) struct TuiCommandOutput {
+    pub log_lines: Vec<String>,
+    pub planet1_title: Line<'static>,
+    pub planet1_lines: Vec<String>,
+    pub planet2_title: Line<'static>,
+    pub planet2_lines: Vec<String>,
+    pub search_results: Vec<PlanetSearchRow>,
+    pub near_results: Vec<NearHit>,
+}
 
 pub fn run() -> Result<()> {
     let cli = args::Cli::parse();
-    println!();
 
-    // One-shot CLI
-    if let Some(cmd) = &cli.cmd {
-        return run_one_shot(&cli, cmd);
+    if cli.cmd.is_none() {
+        return run_interactive_shell(cli.db.clone());
     }
 
-    // Default: interactive CLI
-    run_interactive_shell(cli.db.clone())
+    let cmd = cli
+        .cmd
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("missing command"))?;
+
+    run_one_shot(&cli, cmd)
 }
 
 fn print_db_init_report(report: &sw_galaxy_map_core::db::db_init::DbInitReport) {
@@ -199,6 +218,25 @@ fn print_migration_report(report: &MigrationReport) {
     }
 }
 
+fn tui_default_output() -> TuiCommandOutput {
+    TuiCommandOutput {
+        log_lines: Vec::new(),
+        planet1_title: Line::from("Planet 1 Information"),
+        planet1_lines: vec!["No data".to_string()],
+        planet2_title: Line::from("Planet 2 Information"),
+        planet2_lines: vec!["No data".to_string()],
+        search_results: Vec::new(),
+        near_results: Vec::new(),
+    }
+}
+
+fn tui_cell(opt: &Option<String>) -> &str {
+    match opt.as_deref() {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => "-",
+    }
+}
+
 fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
     match cmd {
         args::Commands::Db { cmd } => match cmd {
@@ -258,7 +296,7 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
         }
 
         args::Commands::Near {
-            r,
+            range,
             unknown,
             fid,
             planet,
@@ -268,7 +306,7 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
         } => {
             validate::validate_near(*unknown, fid, planet, x, y)?;
             let con = open_db_migrating(cli.db.clone())?;
-            commands::near::run(&con, *r, *unknown, *fid, planet.clone(), *x, *y, *limit)
+            commands::near::run(&con, *range, *unknown, *fid, planet.clone(), *x, *y, *limit)
         }
 
         args::Commands::Waypoint { cmd } => {
@@ -289,134 +327,256 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
 }
 
 fn run_interactive_shell(db_arg: Option<String>) -> Result<()> {
-    use std::io::{self, Write};
+    tui::run_tui(db_arg).map_err(Into::into)
+}
 
-    println!(
-        "{}",
-        format_args!(
-            "Interactive mode ({}). Type 'help' or 'exit'.",
-            env!("CARGO_PKG_VERSION").to_string()
-        )
-    );
-    println!(
-        "Tip: commands are the same as one-shot CLI (e.g. `search scarif`, `route show 42`).\n"
-    );
+fn build_planet_title(p: &PlanetSearchRow) -> Line<'static> {
+    let color = match (p.canon, p.legends) {
+        (true, false) => Color::Green,
+        (false, true) => Color::Yellow,
+        (true, true) => Color::Cyan,
+        _ => Color::Gray,
+    };
 
-    // Default DB for the session (user can still pass --db per command)
-    let mut session_db = db_arg;
+    Line::from(Span::styled(
+        format!("{} ({})", p.name, p.fid),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ))
+}
 
-    loop {
-        print!("sw_galaxy_map> ");
-        io::stdout().flush()?;
+pub(crate) fn build_planet_panel(
+    p: &PlanetSearchRow,
+    aliases: Option<&[String]>,
+) -> (Line<'static>, Vec<String>) {
+    let title = build_planet_title(p);
 
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        let line = line.trim();
+    let mut lines = vec![
+        format!("Region: {}", tui_cell(&p.region)),
+        format!("Sector: {}", tui_cell(&p.sector)),
+        format!("System: {}", tui_cell(&p.system)),
+        format!("Grid: {}", tui_cell(&p.grid)),
+        format!("X: {:.2}", p.x),
+        format!("Y: {:.2}", p.y),
+        format!("Canon: {}", if p.canon { "Yes" } else { "No" }),
+        format!("Legends: {}", if p.legends { "Yes" } else { "No" }),
+    ];
 
-        if line.is_empty() {
-            continue;
-        }
-
-        // Built-in REPL commands (start with ':')
-        if let Some(rest) = line.strip_prefix(':') {
-            let rest = rest.trim();
-            if rest == "exit" || rest == "quit" {
-                break;
-            }
-            if rest == "help" {
-                println!("REPL commands:");
-                println!("  :help                 Show this help");
-                println!("  :exit | :quit         Exit interactive mode");
-                println!("  :db <path>            Set default DB path for this session");
-                println!("  :db                   Show current default DB");
-                println!();
-                continue;
-            }
-            if rest == "db" {
-                println!(
-                    "Default DB: {}",
-                    session_db.as_deref().unwrap_or("<auto-resolved (default)>")
-                );
-                continue;
-            }
-            if let Some(path) = rest.strip_prefix("db ") {
-                let path = path.trim();
-                if path.is_empty() {
-                    println!("Usage: :db <path>");
-                } else {
-                    session_db = Some(path.to_string());
-                    println!("Default DB set to: {}", path);
-                }
-                continue;
-            }
-
-            println!("Unknown REPL command: :{}", rest);
-            continue;
-        }
-
-        if line == "exit" || line == "quit" {
-            break;
-        }
-        if line == "help" {
-            println!("Try a normal command, e.g.:");
-            println!("  search scarif");
-            println!("  info coruscant");
-            println!("  near --planet coruscant -r 50");
-            println!("  route show 42");
-            println!("  unknown list");
-            println!("  unknown search <id> --near <parsecs>");
-            println!("  unknown edit <id> --planet <name> --region <region>");
-            println!("Or REPL help: :help\n");
-            continue;
-        }
-
-        // 1) Split into tokens
-        let tokens = match split_args(line) {
-            Ok(t) => t,
-            Err(e) => {
-                println!("Parse error: {:#}", e);
-                continue;
-            }
-        };
-
-        // 2) Build argv for clap: ["sw_galaxy_map", <tokens...>]
-        let mut argv: Vec<String> = Vec::with_capacity(tokens.len() + 2);
-        argv.push("sw_galaxy_map".to_string());
-
-        // If the user didn't pass --db explicitly, inject session default
-        let user_passed_db = tokens.iter().any(|t| t == "--db");
-        if !user_passed_db && let Some(ref db) = session_db {
-            argv.push("--db".to_string());
-            argv.push(db.clone());
-        }
-
-        argv.extend(tokens);
-
-        // 3) Parse with clap
-        match args::Cli::try_parse_from(argv) {
-            Ok(cli) => {
-                // No subcommand (should be rare): ignore
-                let Some(ref cmd) = cli.cmd else {
-                    continue;
-                };
-
-                // 4) Execute using the same dispatcher
-                if let Err(e) = run_one_shot(&cli, cmd) {
-                    println!("Error: {:#}", e);
-                }
-
-                println!();
-            }
-            Err(e) => {
-                // Clap pretty error (unknown cmd, wrong args, etc.)
-                // Use println so it shows in the REPL output buffer
-                println!("{}", e);
-                println!();
-            }
+    if let Some(alias_list) = aliases
+        && !alias_list.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("Aliases:".to_string());
+        for alias in alias_list {
+            lines.push(format!("  - {}", alias));
         }
     }
 
-    Ok(())
+    (title, lines)
+}
+
+pub(crate) fn build_near_planet_panel(
+    planet: &PlanetSearchRow,
+    distance: f64,
+    aliases: Option<&[String]>,
+) -> (Line<'static>, Vec<String>) {
+    let title = build_planet_title(planet);
+
+    let mut lines = vec![
+        format!("Distance: {:.2} pc", distance),
+        format!("Region: {}", tui_cell(&planet.region)),
+        format!("Sector: {}", tui_cell(&planet.sector)),
+        format!("System: {}", tui_cell(&planet.system)),
+        format!("Grid: {}", tui_cell(&planet.grid)),
+        format!("X: {:.2}", planet.x),
+        format!("Y: {:.2}", planet.y),
+        format!("Canon: {}", if planet.canon { "Yes" } else { "No" }),
+        format!("Legends: {}", if planet.legends { "Yes" } else { "No" }),
+    ];
+
+    if let Some(alias_list) = aliases
+        && !alias_list.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("Aliases:".to_string());
+        for alias in alias_list {
+            lines.push(format!("  - {}", alias));
+        }
+    }
+
+    (title, lines)
+}
+
+pub(crate) fn run_one_shot_for_tui(
+    cli: &args::Cli,
+    cmd: &args::Commands,
+) -> Result<TuiCommandOutput> {
+    match cmd {
+        args::Commands::Search { query, limit } => {
+            validate::validate_search(query, *limit)?;
+            let con = open_db_migrating(cli.db.clone())?;
+            let qn = normalize_text(query);
+            let rows = search_planets(&con, &qn, *limit)?;
+
+            let mut out = tui_default_output();
+
+            if rows.is_empty() {
+                out.log_lines
+                    .push(format!("Search result for \"{}\": no planets found", query));
+                return Ok(out);
+            }
+
+            if rows.len() == 1 {
+                let planet = &rows[0];
+                let (title, lines) = build_planet_panel(planet, None);
+
+                out.log_lines
+                    .push(format!("Search result for \"{}\": 1 planet found", query));
+                out.log_lines
+                    .push(format!("Displaying result: {}", planet.name));
+
+                out.planet1_title = title;
+                out.planet1_lines = lines;
+
+                return Ok(out);
+            }
+
+            out.log_lines.push(format!(
+                "Search result for \"{}\": {} planets found",
+                query,
+                rows.len()
+            ));
+            out.log_lines.push(String::new());
+
+            for (idx, p) in rows.iter().enumerate() {
+                out.log_lines.push(format!("  {}. {}", idx + 1, p.name));
+            }
+
+            out.log_lines.push(String::new());
+            out.log_lines
+                .push("Type a number or `option N` to inspect a result.".to_string());
+
+            out.search_results = rows;
+
+            Ok(out)
+        }
+
+        args::Commands::Info { planet } => {
+            let con = open_db_migrating(cli.db.clone())?;
+            let (row, aliases) = commands::info::resolve(&con, planet)?;
+
+            let mut out = tui_default_output();
+            let (title, lines) = build_planet_panel(&row, Some(&aliases));
+
+            out.log_lines
+                .push(format!("Info result for \"{}\": planet found", planet));
+            out.planet1_title = title;
+            out.planet1_lines = lines;
+
+            Ok(out)
+        }
+
+        args::Commands::Near {
+            range,
+            planet,
+            unknown,
+            fid,
+            x,
+            y,
+            limit,
+            ..
+        } => {
+            validate::validate_near(*unknown, fid, planet, x, y)?;
+            let con = open_db_migrating(cli.db.clone())?;
+
+            let (reference, hits) = commands::near::resolve(
+                &con,
+                *range,
+                *unknown,
+                *fid,
+                planet.clone(),
+                *x,
+                *y,
+                *limit,
+            )?;
+
+            let mut out = tui_default_output();
+
+            match &reference {
+                commands::near::NearReference::Planet(reference_planet) => {
+                    let (title, lines) = build_planet_panel(reference_planet, None);
+                    out.planet1_title = title;
+                    out.planet1_lines = lines;
+                    out.log_lines
+                        .push(format!("Reference planet: {}", reference_planet.name));
+                }
+                commands::near::NearReference::Coordinates { x, y } => {
+                    out.planet1_title = Line::from(Span::styled(
+                        format!("Coordinates ({:.2}, {:.2})", x, y),
+                        Style::default()
+                            .fg(Color::LightYellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    out.planet1_lines = vec![
+                        format!("X: {:.2}", x),
+                        format!("Y: {:.2}", y),
+                        format!("Radius: {:.2} pc", range),
+                    ];
+                    out.log_lines
+                        .push(format!("Reference coordinates: X={:.2}, Y={:.2}", x, y));
+                }
+            }
+
+            if hits.is_empty() {
+                out.log_lines.push(format!(
+                    "Near result within {:.2} parsecs: no planets found",
+                    range
+                ));
+                return Ok(out);
+            }
+
+            out.log_lines.push(format!(
+                "Near result within {:.2} parsecs: {} planet{} found",
+                range,
+                hits.len(),
+                if hits.len() == 1 { "" } else { "s" }
+            ));
+            out.log_lines.push(String::new());
+
+            for (idx, hit) in hits.iter().enumerate() {
+                out.log_lines.push(format!(
+                    "  {}. {} ({:.2} pc)",
+                    idx + 1,
+                    hit.planet,
+                    hit.distance
+                ));
+            }
+
+            out.log_lines.push(String::new());
+            out.log_lines
+                .push("Type a number or `option N` to inspect a nearby planet.".to_string());
+
+            if hits.len() == 1 {
+                let hit = &hits[0];
+                let (planet, aliases) = commands::info::resolve_by_fid(&con, hit.fid)?;
+                let (title2, lines2) =
+                    build_near_planet_panel(&planet, hit.distance, Some(&aliases));
+
+                out.planet2_title = title2;
+                out.planet2_lines = lines2;
+            } else {
+                out.near_results = hits;
+            }
+
+            Ok(out)
+        }
+
+        _ => {
+            let mut out = tui_default_output();
+            out.log_lines
+                .push("TUI rendering for this command is not implemented yet.".to_string());
+            Ok(out)
+        }
+    }
 }
 
 fn split_args(line: &str) -> Result<Vec<String>> {

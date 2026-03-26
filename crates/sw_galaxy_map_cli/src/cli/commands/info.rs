@@ -2,6 +2,7 @@ use crate::ui::info;
 use anyhow::Result;
 use rusqlite::Connection;
 use sw_galaxy_map_core::db::queries::{find_planet_for_info, get_aliases};
+use sw_galaxy_map_core::model::PlanetSearchRow;
 use sw_galaxy_map_core::utils::normalize_text;
 
 const LABEL_W: usize = 24;
@@ -12,6 +13,65 @@ fn opt<T: ToString>(v: Option<T>) -> String {
 
 fn opt_str(v: Option<&str>) -> &str {
     v.unwrap_or("-")
+}
+
+pub(crate) fn resolve(con: &Connection, planet: &str) -> Result<(PlanetSearchRow, Vec<String>)> {
+    let pn = normalize_text(planet);
+    let p = match find_planet_for_info(con, &pn)? {
+        Some(p) => p,
+        None => anyhow::bail!("No planet found matching '{}'", planet),
+    };
+
+    let aliases = get_aliases(con, p.fid)?
+        .into_iter()
+        .map(|a| {
+            let src = a.source.unwrap_or_else(|| "unknown".to_string());
+            format!("{} ({})", a.alias, src)
+        })
+        .collect();
+
+    let row = PlanetSearchRow {
+        fid: p.fid,
+        name: p.planet,
+        region: p.region,
+        sector: p.sector,
+        system: p.system,
+        grid: p.grid,
+        x: p.x,
+        y: p.y,
+        canon: p.canon.is_some(),
+        legends: p.legends.is_some(),
+    };
+
+    Ok((row, aliases))
+}
+
+pub(crate) fn resolve_by_fid(con: &Connection, fid: i64) -> Result<(PlanetSearchRow, Vec<String>)> {
+    let p = sw_galaxy_map_core::db::queries::get_planet_by_fid(con, fid)?
+        .ok_or_else(|| anyhow::anyhow!("No planet found with fid {}", fid))?;
+
+    let aliases = get_aliases(con, p.fid)?
+        .into_iter()
+        .map(|a| {
+            let src = a.source.unwrap_or_else(|| "unknown".to_string());
+            format!("{} ({})", a.alias, src)
+        })
+        .collect();
+
+    let row = PlanetSearchRow {
+        fid: p.fid,
+        name: p.planet,
+        region: p.region,
+        sector: p.sector,
+        system: p.system,
+        grid: p.grid,
+        x: p.x,
+        y: p.y,
+        canon: p.canon.is_some(),
+        legends: p.legends.is_some(),
+    };
+
+    Ok((row, aliases))
 }
 
 pub fn run(con: &Connection, planet: String) -> Result<()> {

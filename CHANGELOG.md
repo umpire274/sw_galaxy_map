@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+---
+
+## [0.11.0] - 2026-03-26
+
+### ✨ Added
+
+- Interactive TUI (ratatui-based) for CLI usage
+- Scrollable panels:
+    - Log panel (left)
+    - Planet 1 and Planet 2 panels (right)
+    - Command input panel with history
+- Command history navigation (↑ / ↓)
+- System commands:
+    - `:q`, `:quit`, `:exit`, `:x` to exit
+    - `:help` for system help
+- Interactive selection for:
+    - `search` results
+    - `near` results
+- Automatic panel focus:
+    - `search` → Planet 1
+    - `near` selection → Planet 2
+- Context-aware help line in TUI
+
+### 🔄 Changed
+
+- Refactored `near` command:
+    - Planet is now a positional argument (`near coruscant -r 50`)
+    - `--r` replaced with `--range` (alias `-r`)
+- Refactored `unknown near` command for consistency with `near`
+- Unified rendering of planet data across CLI and TUI
+- Improved validation logic for `near`
+
+### 🧹 Removed
+
+- Deprecated `--planet` flag in `near`
+- Removed unused `build_near_hit_panel` helper
+
+### 🐛 Fixed
+
+- Consistent rendering of `near` results when only one match is found
+- Various minor TUI UX issues (cursor blink, scroll behavior, duplicated input)
+
+---
+
 ## [0.9.10] - 2026-03-21
 
 ### Added
