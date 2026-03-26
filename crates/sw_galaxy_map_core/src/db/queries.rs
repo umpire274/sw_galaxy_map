@@ -480,7 +480,7 @@ fn search_planets_like(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.Canon, p.Legends
             FROM planet_search s
             JOIN planets p ON p.FID = s.planet_fid
             WHERE p.deleted = 0 AND s.search_norm LIKE ?1
@@ -501,6 +501,8 @@ fn search_planets_like(
                 grid: r.get::<_, Option<String>>(5)?,
                 x: r.get(6)?,
                 y: r.get(7)?,
+                canon: r.get(8)?,
+                legends: r.get(9)?,
             })
         })
         .context("Failed to execute LIKE search query")?;
@@ -520,7 +522,7 @@ fn search_planets_fts(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
             WHERE p.deleted = 0 AND planets_fts MATCH ?1
@@ -541,6 +543,8 @@ fn search_planets_fts(
                 grid: r.get::<_, Option<String>>(5)?,
                 x: r.get(6)?,
                 y: r.get(7)?,
+                canon: r.get(8)?,
+                legends: r.get(9)?,
             })
         })
         .context("Failed to execute FTS search query")?;

@@ -13,11 +13,13 @@ pub fn validate_near(
 ) -> Result<()> {
     if unknown {
         if fid.is_none() {
-            bail!("--fid is required when using --unknown.");
+            bail!("--fid is required with --unknown");
         }
+
         if planet.is_some() || x.is_some() || y.is_some() {
-            bail!("--unknown cannot be combined with --planet, --x, or --y.");
+            bail!("When using --unknown, do not specify a planet name or --x/--y coordinates.");
         }
+
         return Ok(());
     }
 
@@ -26,25 +28,37 @@ pub fn validate_near(
     }
 
     if planet.is_some() {
+        if x.is_some() || y.is_some() {
+            bail!("Specify either a planet name or --x/--y coordinates, not both.");
+        }
+
         return Ok(());
     }
+
     if x.is_some() && y.is_some() {
         return Ok(());
+    }
+
+    if x.is_some() || y.is_some() {
+        bail!("You must specify both --x and --y coordinates.\n\n{TIP_NEGATIVE_COORDS}");
     }
 
     bail!(
         "You must specify either:\n\
          \n\
-         - --planet <NAME>\n\
+         - <PLANET_NAME>\n\
          \n\
          OR\n\
          \n\
          - --x=<VALUE> --y=<VALUE>\n\
          \n\
+         OR\n\
+         \n\
+         - --unknown --fid <FID>\n\
+         \n\
          {TIP_NEGATIVE_COORDS}"
     )
 }
-
 pub fn validate_search(query: &str, limit: i64) -> Result<()> {
     if query.trim().is_empty() {
         bail!("Search query cannot be empty.");

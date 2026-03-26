@@ -33,7 +33,7 @@ pub struct AliasRow {
     pub source: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NearHit {
     pub fid: i64,
     pub planet: String,
@@ -290,6 +290,8 @@ pub struct PlanetSearchRow {
     pub grid: Option<String>,
     pub x: f64,
     pub y: f64,
+    pub canon: bool,
+    pub legends: bool,
 }
 
 /// Represents an unknown planet hit near a known planet.

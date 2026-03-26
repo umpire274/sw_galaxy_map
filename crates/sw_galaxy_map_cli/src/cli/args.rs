@@ -52,36 +52,31 @@ pub enum Commands {
     /// - Otherwise you must provide both `--x` and `--y`.
     /// - For negative coordinates, use the `=` form (e.g. `--y=-190`) to avoid CLI parsing ambiguity.
     Near {
-        /// Radius (parsecs)
-        #[arg(long)]
-        r: f64,
+        /// Reference planet name (positional)
+        planet: Option<String>,
 
-        /// Center the search around an unknown planet (in planets_unknown)
-        #[arg(long, action = ArgAction::SetTrue)]
+        /// Search radius (parsecs)
+        #[arg(short = 'r', long = "range")]
+        range: f64,
+
+        /// Use unknown planets table
+        #[arg(long)]
         unknown: bool,
 
-        /// Unknown planet FID (requires --unknown)
+        /// Reference FID (used with --unknown)
         #[arg(long)]
         fid: Option<i64>,
 
-        /// Center the search around a planet (by name)
+        /// X coordinate (alternative to planet)
         #[arg(long)]
-        planet: Option<String>,
-
-        /// X coordinate (parsecs), if --planet is not used.
-        ///
-        /// Tip: for negative values use `--x=-190` (with '=').
-        #[arg(long, verbatim_doc_comment)]
         x: Option<f64>,
 
-        /// Y coordinate (parsecs), if --planet is not used.
-        ///
-        /// Tip: for negative values use `--y=-190` (with '=').
-        #[arg(long, verbatim_doc_comment)]
+        /// Y coordinate (alternative to planet)
+        #[arg(long)]
         y: Option<f64>,
 
-        /// Max rows (default: 20)
-        #[arg(long, default_value_t = 20)]
+        /// Limit number of results
+        #[arg(long, default_value_t = 10)]
         limit: i64,
     },
 
@@ -184,11 +179,14 @@ pub enum UnknownCmd {
     },
 
     Near {
+        /// Reference planet name
         planet: String,
 
-        #[arg(long = "range")]
+        /// Search radius (parsecs)
+        #[arg(short = 'r', long = "range")]
         range: f64,
 
+        /// Limit number of results
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
