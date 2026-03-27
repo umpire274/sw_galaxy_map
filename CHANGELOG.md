@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed typewriter/log interaction issues (flush on command)
 - Fixed incorrect panel updates after route selection
 - Fixed focus inconsistencies after `near` selection
+- Fixed a TUI log scrolling bug where the active typewriter line could remain off-screen when the log already exceeded
+  the viewport.
 
 ---
 

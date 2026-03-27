@@ -659,11 +659,15 @@ fn force_scroll_to_bottom(app: &mut App) {
         return;
     }
 
-    let total_visual_lines = app
+    let mut total_visual_lines = app
         .log
         .iter()
         .map(|line| wrapped_line_count(line, visible_width))
         .sum::<usize>();
+
+    if let Some(partial) = app.typewriter.visible_partial_line() {
+        total_visual_lines += wrapped_line_count(&partial, visible_width);
+    }
 
     if total_visual_lines > visible_lines {
         app.log_scroll = (total_visual_lines - visible_lines) as u16;
