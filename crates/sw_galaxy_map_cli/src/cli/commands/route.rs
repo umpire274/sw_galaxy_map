@@ -1,16 +1,17 @@
-use anyhow::{Result, bail};
-use owo_colors::OwoColorize;
-use rusqlite::Connection;
-use std::io::Write;
-use std::path::Path;
-use std::{fs, io};
-
 use crate::cli::args::{RouteCmd, RouteComputeArgs, RouteExplainArgs};
 use crate::cli::color::Colors;
 use crate::cli::export::{
     ExplainClosest, ExplainDetour, ExplainDominantPenalty, ExplainEndpoint, ExplainExport,
     ExplainNote, ExplainObstacle, ExplainRouteMeta, ExplainScore, ExplainWaypoint,
 };
+use crate::ui::Style;
+use anyhow::{Result, bail};
+use crossterm::style::Stylize;
+use rusqlite::Connection;
+use serde::Serialize;
+use std::io::Write;
+use std::path::Path;
+use std::{fs, io};
 use sw_galaxy_map_core::db::queries;
 use sw_galaxy_map_core::domain::RouteListSort;
 use sw_galaxy_map_core::model::Planet;
@@ -26,9 +27,9 @@ use sw_galaxy_map_core::routing::hyperspace::{
 use sw_galaxy_map_core::routing::route_debug::debug_print_route;
 use sw_galaxy_map_core::routing::router::{RouteOptions, compute_route};
 use sw_galaxy_map_core::routing::sublight::estimate_sublight_time_hours;
+use sw_galaxy_map_core::utils::formatting::truncate_ellipsis;
 use sw_galaxy_map_core::utils::normalize_text;
-
-use crate::ui::Style;
+use sw_galaxy_map_core::validate;
 
 // ETA model defaults (not exposed to CLI yet)
 const DEFAULT_DETOUR_COUNT_BASE: f64 = 0.97;
@@ -1084,9 +1085,18 @@ fn run_prune(con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-use serde::Serialize;
-use sw_galaxy_map_core::utils::formatting::truncate_ellipsis;
-use sw_galaxy_map_core::validate;
+#[derive(Debug)]
+pub(crate) struct RouteComputeTuiData {
+    pub from: Planet,
+    pub to: Planet,
+    pub route_id: i64,
+    pub route: sw_galaxy_map_core::routing::router::Route,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RouteShowTuiData {
+    pub loaded: RouteLoaded,
+}
 
 #[derive(Debug, Serialize)]
 struct RouteListExport {
@@ -1111,6 +1121,17 @@ struct RouteListItem {
 struct RouteListEndpoint {
     fid: i64,
     name: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RouteListTuiItem {
+    pub route_id: i64,
+    pub from_name: String,
+    pub to_name: String,
+    pub status: String,
+    pub length_parsec: Option<f64>,
+    pub waypoints_count: i64,
+    pub detours_count: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -1276,4 +1297,58 @@ fn run_list(con: &Connection, opts: RouteListOptions<'_>) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) fn resolve_compute_for_tui(
+    con: &mut Connection,
+    args: &RouteComputeArgs,
+) -> Result<RouteComputeTuiData> {
+    if args.planets.len() != 2 {
+        bail!("TUI currently supports only single-leg route compute (exactly 2 planets).");
+    }
+
+    let from = &args.planets[0];
+    let to = &args.planets[1];
+    let computed = compute_leg(con, args, from, to)?;
+
+    Ok(RouteComputeTuiData {
+        from: computed.from_p,
+        to: computed.to_p,
+        route_id: computed.route_id,
+        route: computed.route,
+    })
+}
+
+pub(crate) fn resolve_list_for_tui(
+    con: &Connection,
+    limit: usize,
+    status: Option<&str>,
+    from: Option<i64>,
+    to: Option<i64>,
+    wp: Option<usize>,
+    sort: RouteListSort,
+) -> Result<Vec<RouteListTuiItem>> {
+    let (rows, _rows_count) = queries::list_routes(con, limit, status, from, to, wp, sort)?;
+
+    let items = rows
+        .into_iter()
+        .map(|r| RouteListTuiItem {
+            route_id: r.id,
+            from_name: r.from_planet_name,
+            to_name: r.to_planet_name,
+            status: r.status,
+            length_parsec: r.length,
+            waypoints_count: r.waypoints_count,
+            detours_count: r.detours_count,
+        })
+        .collect();
+
+    Ok(items)
+}
+
+pub(crate) fn resolve_show_for_tui(con: &Connection, route_id: i64) -> Result<RouteShowTuiData> {
+    let loaded = queries::load_route(con, route_id)?
+        .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
+
+    Ok(RouteShowTuiData { loaded })
 }

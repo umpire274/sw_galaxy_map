@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+# Changelog
+
+## [0.12.0] - 2026-03-27
+
+### ✨ Added
+
+- Introduced **Navigation panel** in TUI (between Planet1 and Planet2)
+    - Displays route/near relationship data (Length, ETA, Distance, Detours)
+    - Adaptive content via `NavigationPanelKind` (Route / Near / Empty)
+- Added **typewriter effect** for log output
+    - Configurable speed and chunk size
+    - Automatically disabled for long outputs
+- Added support for **route list selection → route show integration**
+    - Selecting a route now renders full route details in panels
+
+### 🔄 Changed
+
+- Refactored TUI layout:
+    - Right side now split into:
+        - Planet1
+        - Navigation
+        - Planet2
+    - Navigation panel height increased for better readability
+- Improved visual alignment in all right panels (Planet + Navigation)
+    - Consistent key/value formatting via helper
+- Improved `near` command UX:
+    - Distance moved from Planet2 panel to Navigation panel
+    - Planet panels now contain only planet-specific data
+- Improved route rendering:
+    - Cleaner header formatting
+    - Improved Detours and Waypoints layout for readability
+- Unified panel-building logic:
+    - Introduced `build_navigation_panel(...)`
+    - Cleaner separation between data and rendering
+
+### 🧠 Internal
+
+- Introduced `NavigationPanelKind` enum for adaptive rendering
+- Refactored TUI output flow to include navigation panel data
+- Improved state handling for selection modes (Search / Near / RouteList)
+- Fixed panel focus logic after layout changes
+- Fixed scrolling logic for new panel structure
+
+### 🐛 Fixed
+
+- Fixed log auto-scroll when content exceeds viewport
+- Fixed typewriter/log interaction issues (flush on command)
+- Fixed incorrect panel updates after route selection
+- Fixed focus inconsistencies after `near` selection
+
+---
+
 ## [0.11.0] - 2026-03-26
 
 ### ✨ Added

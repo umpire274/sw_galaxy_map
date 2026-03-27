@@ -3,6 +3,7 @@ pub mod color;
 pub mod commands;
 pub mod export;
 pub mod tui;
+pub mod typewriter;
 
 use crate::ui::{error, info, success, warning};
 use anyhow::Result;
@@ -23,10 +24,32 @@ pub(crate) struct TuiCommandOutput {
     pub log_lines: Vec<String>,
     pub planet1_title: Line<'static>,
     pub planet1_lines: Vec<String>,
+    pub navigation_title: Line<'static>,
+    pub navigation_lines: Vec<String>,
     pub planet2_title: Line<'static>,
     pub planet2_lines: Vec<String>,
     pub search_results: Vec<PlanetSearchRow>,
     pub near_results: Vec<NearHit>,
+    pub route_list_results: Vec<commands::route::RouteListTuiItem>,
+}
+
+pub(crate) enum NavigationPanelKind {
+    Empty,
+    Route {
+        length_parsec: Option<f64>,
+        eta_text: Option<String>,
+        detours: Option<usize>,
+    },
+    Near {
+        distance_parsec: f64,
+        reference_name: Option<String>,
+    },
+}
+
+const PANEL_LABEL_WIDTH: usize = 9;
+
+fn panel_kv(label: &str, value: impl std::fmt::Display) -> String {
+    format!("{label:<PANEL_LABEL_WIDTH$}: {value}")
 }
 
 pub fn run() -> Result<()> {
@@ -223,10 +246,13 @@ fn tui_default_output() -> TuiCommandOutput {
         log_lines: Vec::new(),
         planet1_title: Line::from("Planet 1 Information"),
         planet1_lines: vec!["No data".to_string()],
+        navigation_title: Line::from("Navigation"),
+        navigation_lines: vec!["No route data".to_string()],
         planet2_title: Line::from("Planet 2 Information"),
         planet2_lines: vec!["No data".to_string()],
         search_results: Vec::new(),
         near_results: Vec::new(),
+        route_list_results: Vec::new(),
     }
 }
 
@@ -351,14 +377,14 @@ pub(crate) fn build_planet_panel(
     let title = build_planet_title(p);
 
     let mut lines = vec![
-        format!("Region: {}", tui_cell(&p.region)),
-        format!("Sector: {}", tui_cell(&p.sector)),
-        format!("System: {}", tui_cell(&p.system)),
-        format!("Grid: {}", tui_cell(&p.grid)),
-        format!("X: {:.2}", p.x),
-        format!("Y: {:.2}", p.y),
-        format!("Canon: {}", if p.canon { "Yes" } else { "No" }),
-        format!("Legends: {}", if p.legends { "Yes" } else { "No" }),
+        panel_kv("Region", tui_cell(&p.region)),
+        panel_kv("Sector", tui_cell(&p.sector)),
+        panel_kv("System", tui_cell(&p.system)),
+        panel_kv("Grid", tui_cell(&p.grid)),
+        panel_kv("X", format!("{:.2}", p.x)),
+        panel_kv("Y", format!("{:.2}", p.y)),
+        panel_kv("Canon", if p.canon { "Yes" } else { "No" }),
+        panel_kv("Legends", if p.legends { "Yes" } else { "No" }),
     ];
 
     if let Some(alias_list) = aliases
@@ -376,21 +402,19 @@ pub(crate) fn build_planet_panel(
 
 pub(crate) fn build_near_planet_panel(
     planet: &PlanetSearchRow,
-    distance: f64,
     aliases: Option<&[String]>,
 ) -> (Line<'static>, Vec<String>) {
     let title = build_planet_title(planet);
 
     let mut lines = vec![
-        format!("Distance: {:.2} pc", distance),
-        format!("Region: {}", tui_cell(&planet.region)),
-        format!("Sector: {}", tui_cell(&planet.sector)),
-        format!("System: {}", tui_cell(&planet.system)),
-        format!("Grid: {}", tui_cell(&planet.grid)),
-        format!("X: {:.2}", planet.x),
-        format!("Y: {:.2}", planet.y),
-        format!("Canon: {}", if planet.canon { "Yes" } else { "No" }),
-        format!("Legends: {}", if planet.legends { "Yes" } else { "No" }),
+        panel_kv("Region", tui_cell(&planet.region)),
+        panel_kv("Sector", tui_cell(&planet.sector)),
+        panel_kv("System", tui_cell(&planet.system)),
+        panel_kv("Grid", tui_cell(&planet.grid)),
+        panel_kv("X", format!("{:.2}", planet.x)),
+        panel_kv("Y", format!("{:.2}", planet.y)),
+        panel_kv("Canon", if planet.canon { "Yes" } else { "No" }),
+        panel_kv("Legends", if planet.legends { "Yes" } else { "No" }),
     ];
 
     if let Some(alias_list) = aliases
@@ -402,6 +426,203 @@ pub(crate) fn build_near_planet_panel(
             lines.push(format!("  - {}", alias));
         }
     }
+
+    (title, lines)
+}
+
+pub(crate) fn build_planet_panel_from_planet(
+    p: &sw_galaxy_map_core::model::Planet,
+) -> (Line<'static>, Vec<String>) {
+    let color = match (p.canon.is_some(), p.legends.is_some()) {
+        (true, false) => Color::Green,
+        (false, true) => Color::Yellow,
+        (true, true) => Color::Cyan,
+        _ => Color::Gray,
+    };
+
+    let title = Line::from(Span::styled(
+        format!("{} ({})", p.planet, p.fid),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ));
+
+    let lines = vec![
+        format!("Region: {}", p.region.as_deref().unwrap_or("-")),
+        format!("Sector: {}", p.sector.as_deref().unwrap_or("-")),
+        format!("System: {}", p.system.as_deref().unwrap_or("-")),
+        format!("Grid: {}", p.grid.as_deref().unwrap_or("-")),
+        format!("X: {:.2}", p.x),
+        format!("Y: {:.2}", p.y),
+        format!("Canon: {}", if p.canon.is_some() { "Yes" } else { "No" }),
+        format!(
+            "Legends: {}",
+            if p.legends.is_some() { "Yes" } else { "No" }
+        ),
+    ];
+
+    (title, lines)
+}
+
+pub(crate) fn build_route_show_output(
+    con: &rusqlite::Connection,
+    loaded: &sw_galaxy_map_core::model::RouteLoaded,
+) -> Result<TuiCommandOutput> {
+    let mut out = tui_default_output();
+
+    let (from_planet, from_aliases) =
+        commands::info::resolve_by_fid(con, loaded.route.from_planet_fid)?;
+    let (to_planet, to_aliases) = commands::info::resolve_by_fid(con, loaded.route.to_planet_fid)?;
+
+    let (p1_title, p1_lines) = build_planet_panel(&from_planet, Some(&from_aliases));
+    let (p2_title, p2_lines) = build_planet_panel(&to_planet, Some(&to_aliases));
+
+    out.planet1_title = p1_title;
+    out.planet1_lines = p1_lines;
+    out.planet2_title = p2_title;
+    out.planet2_lines = p2_lines;
+
+    let route = &loaded.route;
+
+    let eta_text = "";
+    let (nav_title, nav_lines) = build_navigation_panel(NavigationPanelKind::Route {
+        length_parsec: route.length,
+        eta_text: Some(eta_text.to_string()),
+        detours: Some(loaded.detours.len()),
+    });
+    out.navigation_title = nav_title;
+    out.navigation_lines = nav_lines;
+
+    out.log_lines.push(format!("Route #{}", route.id));
+    out.log_lines.push(format!(
+        "{} → {}",
+        route.from_planet_name, route.to_planet_name
+    ));
+
+    if route.status != "ok" {
+        out.log_lines.push(format!("Status: {}", route.status));
+    }
+
+    if let Some(len) = route.length {
+        out.log_lines.push(format!("Length: {:.3} parsec", len));
+    }
+
+    if let Some(it) = route.iterations {
+        out.log_lines.push(format!("Iterations: {}", it));
+    }
+
+    if let Some(upd) = route.updated_at.as_deref() {
+        out.log_lines.push(format!("Updated: {}", upd));
+    } else {
+        out.log_lines.push(format!("Created: {}", route.created_at));
+    }
+
+    out.log_lines.push(String::new());
+    out.log_lines
+        .push(format!("Waypoints: {}", loaded.waypoints.len()));
+    out.log_lines.push(String::new());
+
+    let last_seq = loaded.waypoints.len().saturating_sub(1);
+
+    for w in &loaded.waypoints {
+        let is_start = w.seq as usize == 0;
+        let is_end = w.seq as usize == last_seq;
+
+        let label = if is_start {
+            "Start".to_string()
+        } else if is_end {
+            "End".to_string()
+        } else {
+            match (w.waypoint_name.as_deref(), w.waypoint_kind.as_deref()) {
+                (Some(name), Some(kind)) => {
+                    out.log_lines.push(format!("  {}. {}", w.seq, name));
+                    out.log_lines.push(format!("     kind: {}", kind));
+                    out.log_lines.push(format!("     ({:.3}, {:.3})", w.x, w.y));
+                    out.log_lines.push(String::new());
+                    continue;
+                }
+                (Some(name), None) => name.to_string(),
+                (None, Some(kind)) => format!("Waypoint ({})", kind),
+                (None, None) => format!("Waypoint {}", w.seq),
+            }
+        };
+
+        out.log_lines.push(format!("  {}. {}", w.seq, label));
+        out.log_lines.push(format!("     ({:.3}, {:.3})", w.x, w.y));
+        out.log_lines.push(String::new());
+    }
+
+    out.log_lines.push(String::new());
+    out.log_lines
+        .push(format!("Detours: {}", loaded.detours.len()));
+
+    if !loaded.detours.is_empty() {
+        out.log_lines.push(String::new());
+    }
+
+    for (i, d) in loaded.detours.iter().enumerate() {
+        out.log_lines.push(format!(
+            "  {}. {} (ID: {})",
+            i + 1,
+            d.obstacle_name,
+            d.obstacle_id
+        ));
+        out.log_lines
+            .push(format!("     waypoint: ({:.3}, {:.3})", d.wp_x, d.wp_y));
+        out.log_lines
+            .push(format!("     score: {:.3}", d.score_total));
+        out.log_lines.push(String::new());
+    }
+
+    Ok(out)
+}
+
+pub(crate) fn build_navigation_panel(kind: NavigationPanelKind) -> (Line<'static>, Vec<String>) {
+    let title = Line::from(Span::styled(
+        "Navigation",
+        Style::default()
+            .fg(Color::LightYellow)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    let lines = match kind {
+        NavigationPanelKind::Empty => vec!["No route data".to_string()],
+
+        NavigationPanelKind::Route {
+            length_parsec,
+            eta_text,
+            detours,
+        } => {
+            let mut lines = vec![
+                panel_kv(
+                    "Length",
+                    length_parsec
+                        .map(|v| format!("{:.3} parsec", v))
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                panel_kv("ETA", eta_text.unwrap_or_else(|| "-".to_string())),
+            ];
+
+            if let Some(detours) = detours {
+                lines.push(panel_kv("Detours", detours));
+            }
+
+            lines
+        }
+
+        NavigationPanelKind::Near {
+            distance_parsec,
+            reference_name,
+        } => {
+            let mut lines = vec![panel_kv("Distance", format!("{:.2} pc", distance_parsec))];
+
+            if let Some(reference_name) = reference_name
+                && !reference_name.trim().is_empty()
+            {
+                lines.push(panel_kv("Reference", reference_name));
+            }
+
+            lines
+        }
+    };
 
     (title, lines)
 }
@@ -558,17 +779,186 @@ pub(crate) fn run_one_shot_for_tui(
             if hits.len() == 1 {
                 let hit = &hits[0];
                 let (planet, aliases) = commands::info::resolve_by_fid(&con, hit.fid)?;
-                let (title2, lines2) =
-                    build_near_planet_panel(&planet, hit.distance, Some(&aliases));
+                let (title2, lines2) = build_near_planet_panel(&planet, Some(&aliases));
 
                 out.planet2_title = title2;
                 out.planet2_lines = lines2;
+
+                let reference_name = match &reference {
+                    commands::near::NearReference::Planet(p) => Some(p.name.clone()),
+                    commands::near::NearReference::Coordinates { x, y } => {
+                        Some(format!("({:.2}, {:.2})", x, y))
+                    }
+                };
+                let (nav_title, nav_lines) = build_navigation_panel(NavigationPanelKind::Near {
+                    distance_parsec: hit.distance,
+                    reference_name: reference_name.clone(),
+                });
+                out.navigation_title = nav_title;
+                out.navigation_lines = nav_lines;
             } else {
                 out.near_results = hits;
             }
 
             Ok(out)
         }
+
+        args::Commands::Route { cmd } => match cmd {
+            args::RouteCmd::Compute(args) => {
+                validate::validate_route_planets(&args.planets)?;
+                let mut con = open_db_migrating(cli.db.clone())?;
+                let computed = commands::route::resolve_compute_for_tui(&mut con, args)?;
+
+                let mut out = tui_default_output();
+
+                let (p1_title, p1_lines) = build_planet_panel_from_planet(&computed.from);
+                let (p2_title, p2_lines) = build_planet_panel_from_planet(&computed.to);
+
+                out.planet1_title = p1_title;
+                out.planet1_lines = p1_lines;
+                out.planet2_title = p2_title;
+                out.planet2_lines = p2_lines;
+
+                let (nav_title, nav_lines) = build_navigation_panel(NavigationPanelKind::Route {
+                    length_parsec: Some(computed.route.length),
+                    eta_text: None,
+                    detours: Some(computed.route.detours.len()),
+                });
+
+                out.navigation_title = nav_title;
+                out.navigation_lines = nav_lines;
+
+                out.log_lines.push(format!(
+                    "Route computed successfully: {} → {}",
+                    computed.from.planet, computed.to.planet
+                ));
+                out.log_lines
+                    .push(format!("Route ID: {}", computed.route_id));
+                out.log_lines
+                    .push(format!("Waypoints: {}", computed.route.waypoints.len()));
+                out.log_lines
+                    .push(format!("Detours: {}", computed.route.detours.len()));
+                out.log_lines
+                    .push(format!("Length: {:.3} parsec", computed.route.length));
+                out.log_lines.push(String::new());
+                out.log_lines.push("Waypoints:".to_string());
+
+                let total = computed.route.waypoints.len();
+                for (idx, w) in computed.route.waypoints.iter().enumerate() {
+                    let label = route_waypoint_label(idx, total);
+
+                    out.log_lines.push(format!(
+                        "  {}. {} | ({:.3}, {:.3})",
+                        idx + 1,
+                        label,
+                        w.x,
+                        w.y
+                    ));
+                }
+
+                Ok(out)
+            }
+
+            args::RouteCmd::List {
+                json: _,
+                file: _,
+                limit,
+                status,
+                from,
+                to,
+                wp,
+                sort,
+            } => {
+                validate::validate_limit(*limit as i64, "list")?;
+                let con = open_db_migrating(cli.db.clone())?;
+                let items = commands::route::resolve_list_for_tui(
+                    &con,
+                    *limit,
+                    status.as_deref(),
+                    *from,
+                    *to,
+                    *wp,
+                    *sort,
+                )?;
+
+                let mut out = tui_default_output();
+
+                if items.is_empty() {
+                    out.log_lines
+                        .push("Route list: no routes found.".to_string());
+                    return Ok(out);
+                }
+
+                out.log_lines.push("Routes:".to_string());
+                out.log_lines.push(String::new());
+
+                let len_width = items
+                    .iter()
+                    .map(|item| {
+                        item.length_parsec
+                            .map(|v| format!("{:.3} pc", v))
+                            .unwrap_or_else(|| "-".to_string())
+                            .len()
+                    })
+                    .max()
+                    .unwrap_or(1);
+
+                for (idx, item) in items.iter().enumerate() {
+                    let len_txt = item
+                        .length_parsec
+                        .map(|v| format!("{:.3} pc", v))
+                        .unwrap_or_else(|| "-".to_string());
+
+                    out.log_lines.push(format!(
+                        "  {}. {} → {} (ID: {})",
+                        idx + 1,
+                        item.from_name,
+                        item.to_name,
+                        item.route_id
+                    ));
+
+                    let status_suffix = if item.status != "ok" {
+                        format!(" | status: {}", item.status)
+                    } else {
+                        String::new()
+                    };
+
+                    out.log_lines.push(format!(
+                        "     len: {:>width$} | wp: {:>2} | det: {:>2}{}",
+                        len_txt,
+                        item.waypoints_count,
+                        item.detours_count,
+                        status_suffix,
+                        width = len_width
+                    ));
+
+                    out.log_lines.push(String::new());
+                }
+
+                out.log_lines.push(String::new());
+                out.log_lines
+                    .push("Type a number or `option N` to open a listed route.".to_string());
+
+                out.route_list_results = items;
+
+                Ok(out)
+            }
+
+            args::RouteCmd::Show { route_id } => {
+                validate::validate_route_id(*route_id, "show")?;
+                let con = open_db_migrating(cli.db.clone())?;
+                let data = commands::route::resolve_show_for_tui(&con, *route_id)?;
+                build_route_show_output(&con, &data.loaded)
+            }
+
+            _ => {
+                let mut out = tui_default_output();
+                out.log_lines.push(
+                    "TUI rendering for this route subcommand is not implemented yet.".to_string(),
+                );
+                Ok(out)
+            }
+        },
 
         _ => {
             let mut out = tui_default_output();
@@ -610,4 +1000,14 @@ fn ensure_db_ready(db_path: &Path) -> Result<()> {
         sw_galaxy_map_core::db::db_init::run(Some(db_path.to_string_lossy().to_string()), false)?;
     print_db_init_report(&report);
     Ok(())
+}
+
+fn route_waypoint_label(seq: usize, total: usize) -> String {
+    if seq == 0 {
+        "Start".to_string()
+    } else if seq + 1 == total {
+        "End".to_string()
+    } else {
+        format!("Waypoint {}", seq)
+    }
 }
