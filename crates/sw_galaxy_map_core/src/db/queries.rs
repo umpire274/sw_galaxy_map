@@ -480,7 +480,7 @@ fn search_planets_like(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.Canon, p.Legends
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends
             FROM planet_search s
             JOIN planets p ON p.FID = s.planet_fid
             WHERE p.deleted = 0 AND s.search_norm LIKE ?1
