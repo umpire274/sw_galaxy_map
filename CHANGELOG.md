@@ -7,7 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-# Changelog
+## [0.13.0] - 2026-04-01
+
+### ✨ Added
+
+- Added `db rebuild-search` command to rebuild `planet_search` and FTS indexes from current `planets` data
+    - Standalone entry point backed by `rebuild_search_indexes()` (transaction-safe)
+- Introduced **`sw_galaxy_map_sync`** crate for synchronizing the official Lucasfilm catalog into the `planets` table
+    - Reads the official CSV (~7000 systems from "Star Systems of the Galaxy", Lucasfilm 2023 PDF), normalizes and
+      compares against existing DB records
+    - Multi-strategy matching: exact name, Roman suffix stripping, sector/region/grid triple
+    - Sets per-record `status` field: `active`, `inserted`, `modified`, `skipped`, `deleted`
+    - Generates an XLSX sync report with per-row outcome breakdown
+    - Includes progress bar (indicatif) and dry-run mode
+    - Unit tests for CSV matching strategies
+- Added **hyperspace ETA estimation engine** (`routing::eta`, `routing::hyperspace`)
+    - Region-aware compression factor model with 10 galactic regions (Deep Core → Unknown Regions)
+    - Detour penalty system: geometric, count-based, and severity-based multipliers
+    - Configurable region blend policies: `avg`, `conservative`, `weighted(f64)`
+    - Hyperdrive class multiplier support
+    - `RouteEtaEstimate` struct with full breakdown of all contributing factors
+    - Integrated into `route explain` with `--class` and `--region-blend` flags
+- Added **sublight travel time estimation** (`routing::sublight`)
+    - Parsec-to-km conversion using IAU constant
+    - Configurable speed parameter via `--sublight-kmps` on `route explain`
+- Added `planets.status` field support across the data layer
+    - `search` queries now exclude planets with `status IN ('deleted', 'skipped', 'invalid')`
+- Added `seed_planets_official()` provisioning function with CSV-to-DB import and auto-normalization
+
+### 🔄 Changed
+
+- `search` command simplified to `search <query> [--limit N]` (positional, non-optional query)
+    - Removed `--official`, `--sector`, `--region`, `--grid` flags (official data now synced directly into `planets`)
+    - Removed `run_official()` and `run_any()` hybrid search functions
+    - Removed `SearchRow` enum from `model.rs`
+    - Removed `search_any()` from `queries.rs`
+- `validate_search()` simplified to `(query: &str, limit: i64)`
+- TUI `SelectionMode` reduced from 5 to 4 variants (removed `OfficialSearch`)
+- TUI `TuiCommandOutput` no longer carries `official_search_results`
+- TUI result dispatch simplified from 4-tuple match to 3-tuple match
+- Bumped workspace version to `0.13.0`
+- Added `csv`, `rust_xlsxwriter`, and `indicatif` to workspace dependencies (for sync crate)
+
+### 🧠 Internal
+
+- New `hyperspace` module with `GalacticRegion` enum, region parsing, compression factor model, and detour penalty
+  system
+- New `sublight` module with parsec↔km conversion
+- New `eta` module orchestrating all ETA components into a single `estimate_route_eta()` call
+- `provision.rs`: added `rebuild_search_indexes()` public entry point
+- Routing module reorganized: `eta.rs`, `hyperspace.rs`, `sublight.rs` alongside existing `router.rs`, `collision.rs`,
+  `geometry.rs`
+
+### 🐛 Fixed
+
+- Search queries now correctly filter out soft-deleted/skipped/invalid planets via `status` column
+
+---
 
 ## [0.12.0] - 2026-03-27
 

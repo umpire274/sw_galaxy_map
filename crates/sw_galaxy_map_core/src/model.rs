@@ -292,6 +292,7 @@ pub struct PlanetSearchRow {
     pub y: f64,
     pub canon: bool,
     pub legends: bool,
+    pub status: Option<String>,
 }
 
 /// Represents an unknown planet hit near a known planet.

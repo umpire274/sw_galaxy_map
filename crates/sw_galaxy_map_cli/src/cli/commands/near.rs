@@ -64,6 +64,7 @@ pub(crate) fn resolve(
             y: origin_y,
             canon: false,
             legends: false,
+            status: None,
         });
 
         let rows = near_planets(con, origin_x, origin_y, range, limit)?;
@@ -88,6 +89,7 @@ pub(crate) fn resolve(
             y: p.y,
             canon: p.canon.is_some(),
             legends: p.legends.is_some(),
+            status: p.status,
         });
 
         let rows = near_planets_excluding_fid(con, p.fid, p.x, p.y, range, limit)?;

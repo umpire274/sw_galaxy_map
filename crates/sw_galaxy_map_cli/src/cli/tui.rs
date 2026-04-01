@@ -370,9 +370,6 @@ fn handle_key(key: KeyEvent, app: &mut App) -> bool {
                                                     app.near_results.clear();
                                                     app.selection_mode = SelectionMode::RouteList;
                                                 }
-                                                (false, false, false) => {
-                                                    app.clear_selectable_results();
-                                                }
                                                 _ => {
                                                     app.clear_selectable_results();
                                                 }
@@ -888,7 +885,6 @@ fn handle_route_list_selection(app: &mut App, index: usize) {
         ),
     );
 }
-
 fn handle_selection(app: &mut App, index: usize) {
     if index == 0 {
         push_log_line(app, "Invalid selection: use a number starting from 1.");

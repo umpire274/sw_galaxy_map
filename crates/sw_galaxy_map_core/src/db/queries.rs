@@ -480,10 +480,10 @@ fn search_planets_like(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends, p.status
             FROM planet_search s
             JOIN planets p ON p.FID = s.planet_fid
-            WHERE p.deleted = 0 AND s.search_norm LIKE ?1
+            WHERE p.status NOT IN ('deleted', 'skipped', 'invalid') AND s.search_norm LIKE ?1
             ORDER BY p.Planet COLLATE NOCASE
             LIMIT ?2
             "#,
@@ -503,15 +503,13 @@ fn search_planets_like(
                 y: r.get(7)?,
                 canon: r.get(8)?,
                 legends: r.get(9)?,
+                status: r.get::<_, Option<String>>(10)?,
             })
         })
         .context("Failed to execute LIKE search query")?;
 
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+    let items = rows.collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+    Ok(items)
 }
 
 fn search_planets_fts(
@@ -522,10 +520,10 @@ fn search_planets_fts(
     let mut stmt = con
         .prepare(
             r#"
-            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends
+            SELECT p.FID, p.Planet, p.Region, p.Sector, p.System, p.Grid, p.X, p.Y, p.Canon, p.Legends, p.status
             FROM planets_fts f
             JOIN planets p ON p.FID = f.planet_fid
-            WHERE p.deleted = 0 AND planets_fts MATCH ?1
+            WHERE p.status NOT IN ('deleted', 'skipped', 'invalid') AND planets_fts MATCH ?1
             ORDER BY bm25(planets_fts)
             LIMIT ?2
             "#,
@@ -545,15 +543,13 @@ fn search_planets_fts(
                 y: r.get(7)?,
                 canon: r.get(8)?,
                 legends: r.get(9)?,
+                status: r.get::<_, Option<String>>(10)?,
             })
         })
         .context("Failed to execute FTS search query")?;
 
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+    let items = rows.collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+    Ok(items)
 }
 
 pub fn near_planets(con: &Connection, x: f64, y: f64, r: f64, limit: i64) -> Result<Vec<NearHit>> {
@@ -1071,7 +1067,7 @@ pub fn list_planets_in_bbox(
         r#"
         SELECT FID, Planet, X, Y
         FROM planets
-        WHERE deleted = 0
+        WHERE status NOT IN ('deleted', 'skipped', 'invalid')
           AND X BETWEEN ?1 AND ?2
           AND Y BETWEEN ?3 AND ?4
         ORDER BY Planet COLLATE NOCASE
@@ -1118,7 +1114,7 @@ pub fn list_routing_obstacles_in_bbox(
           MAX(COALESCE(wpl.distance, ?6)) AS radius
         FROM waypoint_planets wpl
         JOIN planets p ON p.FID = wpl.planet_fid
-        WHERE p.deleted = 0
+        WHERE p.status NOT IN ('deleted', 'skipped', 'invalid')
           AND lower(wpl.role) IN ('avoid','danger','interdiction')
           AND p.X BETWEEN ?1 AND ?2
           AND p.Y BETWEEN ?3 AND ?4
@@ -1816,16 +1812,16 @@ mod tests {
                 Grid TEXT,
                 X REAL NOT NULL,
                 Y REAL NOT NULL,
-                deleted INTEGER NOT NULL DEFAULT 0
+                status TEXT
             );
             CREATE TABLE planet_search (
                 planet_fid INTEGER NOT NULL,
                 search_norm TEXT NOT NULL
             );
-            INSERT INTO planets (FID, Planet, Region, Sector, System, Grid, X, Y, deleted) VALUES
-                (1, 'Alderaan', 'Core Worlds', 'Alderaan', 'Alderaan', 'L-4', 10.0, 10.0, 0),
-                (2, 'Tatooine', 'Outer Rim', 'Arkanis', 'Tatoo', 'R-16', 20.0, 25.0, 0),
-                (3, 'Deleted', 'Unknown', NULL, NULL, NULL, 50.0, 50.0, 1);
+            INSERT INTO planets (FID, Planet, Region, Sector, System, Grid, X, Y, status) VALUES
+                (1, 'Alderaan', 'Core Worlds', 'Alderaan', 'Alderaan', 'L-4', 10.0, 10.0, 'active'),
+                (2, 'Tatooine', 'Outer Rim', 'Arkanis', 'Tatoo', 'R-16', 20.0, 25.0, 'active'),
+                (3, 'Deleted', 'Unknown', NULL, NULL, NULL, 50.0, 50.0, 'deleted');
             INSERT INTO planet_search (planet_fid, search_norm) VALUES
                 (1, 'alderaan house organa'),
                 (2, 'tatooine luke skywalker'),

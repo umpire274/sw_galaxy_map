@@ -1087,10 +1087,7 @@ fn run_prune(con: &mut Connection) -> Result<()> {
 
 #[derive(Debug)]
 pub(crate) struct RouteComputeTuiData {
-    pub from: Planet,
-    pub to: Planet,
     pub route_id: i64,
-    pub route: sw_galaxy_map_core::routing::router::Route,
 }
 
 #[derive(Debug, Clone)]
@@ -1312,10 +1309,7 @@ pub(crate) fn resolve_compute_for_tui(
     let computed = compute_leg(con, args, from, to)?;
 
     Ok(RouteComputeTuiData {
-        from: computed.from_p,
-        to: computed.to_p,
         route_id: computed.route_id,
-        route: computed.route,
     })
 }
 
