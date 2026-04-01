@@ -59,6 +59,7 @@ pub fn validate_near(
          {TIP_NEGATIVE_COORDS}"
     )
 }
+
 pub fn validate_search(query: &str, limit: i64) -> Result<()> {
     if query.trim().is_empty() {
         bail!("Search query cannot be empty.");
@@ -69,48 +70,48 @@ pub fn validate_search(query: &str, limit: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_route_id(route_id: i64, ctx: &str) -> anyhow::Result<()> {
+pub fn validate_route_id(route_id: i64, ctx: &str) -> Result<()> {
     if route_id <= 0 {
-        anyhow::bail!("Invalid route id for {ctx}: {route_id} (must be > 0)");
+        bail!("Invalid route id for {ctx}: {route_id} (must be > 0)");
     }
     Ok(())
 }
 
-pub fn validate_route_compute(from: &str, to: &str) -> anyhow::Result<()> {
+pub fn validate_route_compute(from: &str, to: &str) -> Result<()> {
     let f = from.trim();
     let t = to.trim();
 
     if f.is_empty() || t.is_empty() {
-        anyhow::bail!("FROM and TO must be non-empty");
+        bail!("FROM and TO must be non-empty");
     }
     if f.eq_ignore_ascii_case(t) {
-        anyhow::bail!("FROM and TO must be different");
+        bail!("FROM and TO must be different");
     }
     Ok(())
 }
 
-pub fn validate_route_planets(planets: &[String]) -> anyhow::Result<()> {
+pub fn validate_route_planets(planets: &[String]) -> Result<()> {
     if planets.len() < 2 {
-        anyhow::bail!("Route compute requires at least two planets.");
+        bail!("Route compute requires at least two planets.");
     }
     for (idx, planet) in planets.iter().enumerate() {
         if planet.trim().is_empty() {
-            anyhow::bail!("Planet {} cannot be empty.", idx + 1);
+            bail!("Planet {} cannot be empty.", idx + 1);
         }
     }
     for window in planets.windows(2) {
         let from = window[0].trim();
         let to = window[1].trim();
         if from.eq_ignore_ascii_case(to) {
-            anyhow::bail!("Adjacent planets must be different ({} → {}).", from, to);
+            bail!("Adjacent planets must be different ({} → {}).", from, to);
         }
     }
     Ok(())
 }
 
-pub fn validate_limit(limit: i64, ctx: &str) -> anyhow::Result<()> {
+pub fn validate_limit(limit: i64, ctx: &str) -> Result<()> {
     if limit <= 0 {
-        anyhow::bail!("Invalid limit for {ctx}: {limit} (must be > 0)");
+        bail!("Invalid limit for {ctx}: {limit} (must be > 0)");
     }
     Ok(())
 }

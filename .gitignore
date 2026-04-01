@@ -28,3 +28,5 @@ pnpm-debug.log*
 *.p12
 *.pfx
 *.der
+
+!sync_report.xlsx

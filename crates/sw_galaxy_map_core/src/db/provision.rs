@@ -1,5 +1,5 @@
 use crate::utils::normalize::normalize_text;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -168,7 +168,7 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_waypoints_xy ON waypoints(x, y);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_fingerprint
             ON waypoints(fingerprint);
-            
+
         CREATE TRIGGER IF NOT EXISTS trg_waypoints_updated_at
         AFTER UPDATE ON waypoints
         FOR EACH ROW
@@ -334,7 +334,7 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             p.status,
             p.ref
         FROM planets p
-        WHERE p.deleted = 0
+        WHERE p.status NOT IN ('deleted', 'skipped', 'invalid')
         ORDER BY p.Planet COLLATE NOCASE;
 
         -- =========================
@@ -374,7 +374,7 @@ fn build_search_row(tx: &Transaction<'_>, fid: i64) -> Result<Option<SearchRow>>
                 group_concat(a.alias_norm, ' ') AS aliases_norm
             FROM planets p
             LEFT JOIN planet_aliases a ON a.planet_fid = p.FID
-            WHERE p.FID = ? AND p.deleted = 0
+            WHERE p.FID = ? AND p.status NOT IN ('deleted', 'skipped', 'invalid')
             GROUP BY p.FID
             "#,
             [fid],
@@ -480,7 +480,8 @@ fn rebuild_planet_search(tx: &Transaction<'_>) -> Result<()> {
         "#,
     )?;
 
-    let mut q = tx.prepare("SELECT FID FROM planets WHERE deleted = 0")?;
+    let mut q = tx
+        .prepare("SELECT FID FROM planets WHERE status NOT IN ('deleted', 'skipped', 'invalid')")?;
     let fids = q.query_map([], |r| r.get::<_, i64>(0))?;
 
     for fid in fids {
@@ -534,8 +535,7 @@ pub fn insert_all(
             r#"
             INSERT INTO planets(
                 FID, Planet, planet_norm, Region, Sector, System, Grid,
-                X, Y,
-                arcgis_hash, deleted,
+                X, Y, arcgis_hash,
                 Canon, Legends, zm,
                 name0, name1, name2,
                 lat, long, ref, status, CRegion, CRegion_li
@@ -694,7 +694,7 @@ fn rebuild_planets_fts(tx: &Transaction<'_>) -> Result<()> {
         SELECT s.planet_fid, s.search_norm
         FROM planet_search s
         JOIN planets p ON p.FID = s.planet_fid
-        WHERE p.deleted = 0
+        WHERE p.status NOT IN ("deleted", "skipped", "invalid")
         "#,
         [],
     )?;
@@ -721,4 +721,21 @@ pub(crate) fn rebuild_planets_fts_if_enabled(tx: &Transaction<'_>) -> Result<()>
 
 pub(crate) fn meta_upsert_public(con: &Connection, key: &str, value: &str) -> Result<()> {
     meta_upsert(con, key, value)
+}
+
+/// Rebuild the `planet_search` table and (if enabled) the `planets_fts` FTS index.
+///
+/// This is the public entry-point for `db rebuild-search`.
+pub fn rebuild_search_indexes(con: &mut Connection) -> Result<()> {
+    let tx = con
+        .transaction()
+        .context("Failed to start rebuild-search transaction")?;
+
+    rebuild_planet_search_public(&tx)?;
+    rebuild_planets_fts_if_enabled(&tx)?;
+
+    tx.commit()
+        .context("Failed to commit rebuild-search transaction")?;
+
+    Ok(())
 }

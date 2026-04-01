@@ -41,6 +41,7 @@ pub(crate) fn resolve(con: &Connection, planet: &str) -> Result<(PlanetSearchRow
         y: p.y,
         canon: p.canon.is_some(),
         legends: p.legends.is_some(),
+        status: p.status,
     };
 
     Ok((row, aliases))
@@ -69,6 +70,7 @@ pub(crate) fn resolve_by_fid(con: &Connection, fid: i64) -> Result<(PlanetSearch
         y: p.y,
         canon: p.canon.is_some(),
         legends: p.legends.is_some(),
+        status: p.status,
     };
 
     Ok((row, aliases))

@@ -149,6 +149,9 @@ pub enum DbCommands {
         #[arg(long, action = clap::ArgAction::SetTrue)]
         dry_run: bool,
     },
+
+    /// Rebuild the `planet_search` table and FTS index from current `planets` data
+    RebuildSearch,
 }
 
 #[derive(Subcommand, Debug)]
