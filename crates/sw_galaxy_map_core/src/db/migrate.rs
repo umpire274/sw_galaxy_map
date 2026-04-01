@@ -296,10 +296,8 @@ fn m_to_v7(tx: &Transaction<'_>) -> Result<()> {
         CREATE TABLE IF NOT EXISTS route_detours (
           route_id        INTEGER NOT NULL,
           idx             INTEGER NOT NULL,
-
           iteration       INTEGER NOT NULL,
           segment_index   INTEGER NOT NULL,
-
           obstacle_id     INTEGER NOT NULL,
           obstacle_x      REAL NOT NULL,
           obstacle_y      REAL NOT NULL,
@@ -362,7 +360,6 @@ fn m_to_v8(tx: &Transaction<'_>) -> Result<()> {
 }
 
 fn m_to_v9(tx: &Transaction<'_>) -> Result<()> {
-    // No changes in v9 yet
     if !column_exists(tx, "route_detours", "tries_used")? {
         tx.execute_batch(
             r#"

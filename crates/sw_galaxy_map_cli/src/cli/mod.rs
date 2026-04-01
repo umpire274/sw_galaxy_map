@@ -15,7 +15,8 @@ use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport, resolve_db_pat
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
 use sw_galaxy_map_core::db::queries::search_planets;
-use sw_galaxy_map_core::model::{NearHit, PlanetSearchRow};
+use sw_galaxy_map_core::model::{NearHit, PlanetSearchRow, RouteLoaded};
+use sw_galaxy_map_core::routing::eta::{RegionBlend, RouteEtaEstimate, estimate_route_eta};
 use sw_galaxy_map_core::utils::normalize_text;
 use sw_galaxy_map_core::validate;
 
@@ -39,6 +40,7 @@ pub(crate) enum NavigationPanelKind {
         length_parsec: Option<f64>,
         eta_text: Option<String>,
         detours: Option<usize>,
+        region_text: Option<String>,
     },
     Near {
         distance_parsec: f64,
@@ -47,6 +49,10 @@ pub(crate) enum NavigationPanelKind {
 }
 
 const PANEL_LABEL_WIDTH: usize = 9;
+const ETA_HYPERDRIVE_CLASS: f64 = 1.0;
+const ETA_DETOUR_COUNT_BASE: f64 = 0.97;
+const ETA_SEVERITY_K: f64 = 0.15;
+const ETA_REGION_BLEND: RegionBlend = RegionBlend::Avg;
 
 fn panel_kv(label: &str, value: impl std::fmt::Display) -> String {
     format!("{label:<PANEL_LABEL_WIDTH$}: {value}")
@@ -242,12 +248,14 @@ fn print_migration_report(report: &MigrationReport) {
 }
 
 fn tui_default_output() -> TuiCommandOutput {
+    let (navigation_title, navigation_lines) = build_navigation_panel(NavigationPanelKind::Empty);
+
     TuiCommandOutput {
         log_lines: Vec::new(),
         planet1_title: Line::from("Planet 1 Information"),
         planet1_lines: vec!["No data".to_string()],
-        navigation_title: Line::from("Navigation"),
-        navigation_lines: vec!["No route data".to_string()],
+        navigation_title,
+        navigation_lines,
         planet2_title: Line::from("Planet 2 Information"),
         planet2_lines: vec!["No data".to_string()],
         search_results: Vec::new(),
@@ -306,6 +314,12 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
                 let mut con = open_db_raw(cli.db.clone())?;
                 let report = sw_galaxy_map_core::db::migrate::run(&mut con, *dry_run, true)?;
                 print_migration_report(&report);
+                Ok(())
+            }
+
+            args::DbCommands::RebuildSearch => {
+                let mut con = open_db_migrating(cli.db.clone())?;
+                sw_galaxy_map_core::db::provision::rebuild_search_indexes(&mut con)?;
                 Ok(())
             }
         },
@@ -430,38 +444,6 @@ pub(crate) fn build_near_planet_panel(
     (title, lines)
 }
 
-pub(crate) fn build_planet_panel_from_planet(
-    p: &sw_galaxy_map_core::model::Planet,
-) -> (Line<'static>, Vec<String>) {
-    let color = match (p.canon.is_some(), p.legends.is_some()) {
-        (true, false) => Color::Green,
-        (false, true) => Color::Yellow,
-        (true, true) => Color::Cyan,
-        _ => Color::Gray,
-    };
-
-    let title = Line::from(Span::styled(
-        format!("{} ({})", p.planet, p.fid),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    ));
-
-    let lines = vec![
-        format!("Region: {}", p.region.as_deref().unwrap_or("-")),
-        format!("Sector: {}", p.sector.as_deref().unwrap_or("-")),
-        format!("System: {}", p.system.as_deref().unwrap_or("-")),
-        format!("Grid: {}", p.grid.as_deref().unwrap_or("-")),
-        format!("X: {:.2}", p.x),
-        format!("Y: {:.2}", p.y),
-        format!("Canon: {}", if p.canon.is_some() { "Yes" } else { "No" }),
-        format!(
-            "Legends: {}",
-            if p.legends.is_some() { "Yes" } else { "No" }
-        ),
-    ];
-
-    (title, lines)
-}
-
 pub(crate) fn build_route_show_output(
     con: &rusqlite::Connection,
     loaded: &sw_galaxy_map_core::model::RouteLoaded,
@@ -482,11 +464,30 @@ pub(crate) fn build_route_show_output(
 
     let route = &loaded.route;
 
-    let eta_text = "";
+    let eta_estimate = estimate_route_eta(
+        con,
+        loaded,
+        ETA_HYPERDRIVE_CLASS,
+        ETA_REGION_BLEND,
+        ETA_DETOUR_COUNT_BASE,
+        ETA_SEVERITY_K,
+    );
+
+    let eta_text = eta_estimate.as_ref().map(|e| e.format_human());
+
+    let region_text = eta_estimate.as_ref().map(|e| {
+        format!(
+            "{} → {}",
+            region_name(e.from_region),
+            region_name(e.to_region)
+        )
+    });
+
     let (nav_title, nav_lines) = build_navigation_panel(NavigationPanelKind::Route {
         length_parsec: route.length,
-        eta_text: Some(eta_text.to_string()),
+        eta_text,
         detours: Some(loaded.detours.len()),
+        region_text,
     });
     out.navigation_title = nav_title;
     out.navigation_lines = nav_lines;
@@ -590,6 +591,7 @@ pub(crate) fn build_navigation_panel(kind: NavigationPanelKind) -> (Line<'static
             length_parsec,
             eta_text,
             detours,
+            region_text,
         } => {
             let mut lines = vec![
                 panel_kv(
@@ -603,6 +605,10 @@ pub(crate) fn build_navigation_panel(kind: NavigationPanelKind) -> (Line<'static
 
             if let Some(detours) = detours {
                 lines.push(panel_kv("Detours", detours));
+            }
+
+            if let Some(region_text) = region_text {
+                lines.push(panel_kv("Region", region_text));
             }
 
             lines
@@ -635,6 +641,7 @@ pub(crate) fn run_one_shot_for_tui(
         args::Commands::Search { query, limit } => {
             validate::validate_search(query, *limit)?;
             let con = open_db_migrating(cli.db.clone())?;
+
             let qn = normalize_text(query);
             let rows = search_planets(&con, &qn, *limit)?;
 
@@ -809,52 +816,14 @@ pub(crate) fn run_one_shot_for_tui(
                 let mut con = open_db_migrating(cli.db.clone())?;
                 let computed = commands::route::resolve_compute_for_tui(&mut con, args)?;
 
-                let mut out = tui_default_output();
+                let loaded = sw_galaxy_map_core::db::queries::load_route(&con, computed.route_id)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Route not found after compute: id={}", computed.route_id)
+                    })?;
 
-                let (p1_title, p1_lines) = build_planet_panel_from_planet(&computed.from);
-                let (p2_title, p2_lines) = build_planet_panel_from_planet(&computed.to);
-
-                out.planet1_title = p1_title;
-                out.planet1_lines = p1_lines;
-                out.planet2_title = p2_title;
-                out.planet2_lines = p2_lines;
-
-                let (nav_title, nav_lines) = build_navigation_panel(NavigationPanelKind::Route {
-                    length_parsec: Some(computed.route.length),
-                    eta_text: None,
-                    detours: Some(computed.route.detours.len()),
-                });
-
-                out.navigation_title = nav_title;
-                out.navigation_lines = nav_lines;
-
-                out.log_lines.push(format!(
-                    "Route computed successfully: {} → {}",
-                    computed.from.planet, computed.to.planet
-                ));
+                let mut out = build_route_show_output(&con, &loaded)?;
                 out.log_lines
-                    .push(format!("Route ID: {}", computed.route_id));
-                out.log_lines
-                    .push(format!("Waypoints: {}", computed.route.waypoints.len()));
-                out.log_lines
-                    .push(format!("Detours: {}", computed.route.detours.len()));
-                out.log_lines
-                    .push(format!("Length: {:.3} parsec", computed.route.length));
-                out.log_lines.push(String::new());
-                out.log_lines.push("Waypoints:".to_string());
-
-                let total = computed.route.waypoints.len();
-                for (idx, w) in computed.route.waypoints.iter().enumerate() {
-                    let label = route_waypoint_label(idx, total);
-
-                    out.log_lines.push(format!(
-                        "  {}. {} | ({:.3}, {:.3})",
-                        idx + 1,
-                        label,
-                        w.x,
-                        w.y
-                    ));
-                }
+                    .insert(0, "Route computed successfully.".to_string());
 
                 Ok(out)
             }
@@ -1002,12 +971,36 @@ fn ensure_db_ready(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn route_waypoint_label(seq: usize, total: usize) -> String {
-    if seq == 0 {
-        "Start".to_string()
-    } else if seq + 1 == total {
-        "End".to_string()
-    } else {
-        format!("Waypoint {}", seq)
+pub fn route_eta_text(con: &rusqlite::Connection, loaded: &RouteLoaded) -> Option<String> {
+    route_eta(con, loaded).map(|e| e.format_human())
+}
+
+pub fn route_eta(con: &rusqlite::Connection, loaded: &RouteLoaded) -> Option<RouteEtaEstimate> {
+    estimate_route_eta(
+        con,
+        loaded,
+        ETA_HYPERDRIVE_CLASS,
+        ETA_REGION_BLEND,
+        ETA_DETOUR_COUNT_BASE,
+        ETA_SEVERITY_K,
+    )
+}
+
+fn region_name(r: sw_galaxy_map_core::routing::hyperspace::GalacticRegion) -> &'static str {
+    match r {
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::DeepCore => "Deep Core",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::CoreWorlds => "Core Worlds",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::Colonies => "Colonies",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::InnerRim => "Inner Rim",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::ExpansionRegion => {
+            "Expansion Region"
+        }
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::MidRim => "Mid Rim",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::HuttSpace => "Hutt Space",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::OuterRim => "Outer Rim",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::WildSpace => "Wild Space",
+        sw_galaxy_map_core::routing::hyperspace::GalacticRegion::UnknownRegions => {
+            "Unknown Regions"
+        }
     }
 }

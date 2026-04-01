@@ -4,7 +4,7 @@
 //! hyperspace travel time starting from a Euclidean route length in parsecs.
 //!
 //! Core formula (hours):
-//! `time = distance_parsec / compression_factor / hyperdrive_class`
+//! `time = (distance_parsec / compression_factor) * hyperdrive_class`
 //!
 //! Notes:
 //! - `compression_factor` models how much a hyperspace route "compresses" real

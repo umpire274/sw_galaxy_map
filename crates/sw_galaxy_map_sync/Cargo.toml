@@ -1,0 +1,18 @@
+[package]
+name = "sw_galaxy_map_sync"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+csv.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+indicatif.workspace = true
+rust_xlsxwriter.workspace = true
+
+[[bin]]
+name = "sw_galaxy_map_sync"

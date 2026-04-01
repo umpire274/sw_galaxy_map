@@ -147,8 +147,7 @@ fn upsert_planet(tx: &Transaction<'_>, a: &Value) -> Result<()> {
         r#"
         INSERT INTO planets(
             FID, Planet, planet_norm, Region, Sector, System, Grid,
-            X, Y,
-            arcgis_hash, deleted,
+            X, Y, arcgis_hash,
             Canon, Legends, zm,
             name0, name1, name2,
             lat, long, ref, status, CRegion, CRegion_li
@@ -234,8 +233,8 @@ fn mark_deleted_missing(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Resul
     let changed = tx.execute(
         r#"
         UPDATE planets
-        SET deleted = 1
-        WHERE deleted = 0
+        SET status = 'deleted'
+        WHERE status NOT IN ('deleted', 'skipped', 'invalid')
           AND FID NOT IN (SELECT fid FROM __keep_fids)
         "#,
         [],
@@ -247,7 +246,7 @@ fn mark_deleted_missing(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Resul
 
 fn prune_deleted(tx: &Transaction<'_>) -> Result<i64> {
     // FK cascades will remove aliases/search automatically (where linked).
-    let n = tx.execute("DELETE FROM planets WHERE deleted = 1", [])? as i64;
+    let n = tx.execute("DELETE FROM planets WHERE status = 'deleted'", [])? as i64;
     Ok(n)
 }
 
@@ -475,9 +474,11 @@ pub fn run(
         if dry_run {
             // would prune: already deleted + would-be-marked-deleted
             let already_deleted: i64 = tx
-                .query_row("SELECT COUNT(*) FROM planets WHERE deleted = 1", [], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT COUNT(*) FROM planets WHERE status = 'deleted'",
+                    [],
+                    |r| r.get(0),
+                )
                 .context("Failed to count already deleted planets")?;
             already_deleted + marked_deleted
         } else {

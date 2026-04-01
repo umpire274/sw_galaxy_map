@@ -36,3 +36,4 @@ chrono.workspace = true
 atty.workspace = true
 sha2.workspace = true
 hex.workspace = true
+csv = "1.4.0"

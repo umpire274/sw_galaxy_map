@@ -146,9 +146,11 @@ pub fn run(db_arg: Option<String>) -> Result<DbStatusReport> {
     push_kv(&mut lines, "planets", planets_total);
 
     let active = con
-        .query_row("SELECT COUNT(*) FROM planets WHERE deleted = 0", [], |r| {
-            r.get::<_, i64>(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM planets WHERE p.status NOT IN ('deleted', 'skipped', 'invalid')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
         .optional();
     if let Ok(Some(active_n)) = active {
         let deleted_n = planets_total - active_n;

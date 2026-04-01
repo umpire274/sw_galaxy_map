@@ -42,6 +42,8 @@ pub fn run(con: &Connection, query: String, limit: i64) -> Result<()> {
     let x_refs: Vec<&str> = x_vals.iter().map(String::as_str).collect();
     let y_refs: Vec<&str> = y_vals.iter().map(String::as_str).collect();
 
+    let status_refs = rows.iter().map(|p| cell(&p.status)).collect::<Vec<&str>>();
+
     let name_w = col_width_from_strs(&name_vals, "Planet".len().max(12));
     let region_w = col_width_from_strs(&region_vals, "Region".len().max(10));
     let sector_w = col_width_from_strs(&sector_vals, "Sector".len().max(10));
@@ -49,10 +51,11 @@ pub fn run(con: &Connection, query: String, limit: i64) -> Result<()> {
     let grid_w = col_width_from_strs(&grid_vals, "Grid".len().max(6));
     let x_w = col_width_from_strs(&x_refs, "X".len().max(8));
     let y_w = col_width_from_strs(&y_refs, "Y".len().max(8));
+    let status_w = col_width_from_strs(&status_refs, "Status".len());
 
     // --- Header
     println!(
-        "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {x:>x_w$}  {y:>y_w$}",
+        "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {x:>x_w$}  {y:>y_w$}  {status:<status_w$}",
         fid = "FID",
         name = "Planet",
         region = "Region",
@@ -61,17 +64,18 @@ pub fn run(con: &Connection, query: String, limit: i64) -> Result<()> {
         grid = "Grid",
         x = "X",
         y = "Y",
+        status = "Status"
     );
 
     println!(
-        "{:-<fid_w$}   {:-<name_w$}  {:-<region_w$}  {:-<sector_w$}  {:-<system_w$}  {:-<grid_w$}  {:-<x_w$}  {:-<y_w$}",
-        "", "", "", "", "", "", "", ""
+        "{:-<fid_w$}   {:-<name_w$}  {:-<region_w$}  {:-<sector_w$}  {:-<system_w$}  {:-<grid_w$}  {:-<x_w$}  {:-<y_w$}  {:-<status_w$}",
+        "", "", "", "", "", "", "", "", ""
     );
 
     // --- Rows
     for p in &rows {
         println!(
-            "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {x:>x_w$}  {y:>y_w$}",
+            "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {x:>x_w$}  {y:>y_w$}  {status:<status_w$}",
             fid = p.fid,
             name = p.name,
             region = cell(&p.region),
@@ -80,6 +84,7 @@ pub fn run(con: &Connection, query: String, limit: i64) -> Result<()> {
             grid = cell(&p.grid),
             x = format!("{:.2}", p.x),
             y = format!("{:.2}", p.y),
+            status = cell(&p.status),
         );
     }
 
