@@ -2,7 +2,15 @@
 name = "sw_galaxy_map_sync"
 version = "0.2.0"
 edition = "2024"
+authors = ["Alessandro Maestri <umpire274@gmail.com>"]
+description = "Synchronization tool for the Star Wars galaxy map — imports the official Lucasfilm star-systems catalog into the local SQLite planets database with multi-strategy matching and status tracking"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/umpire274/sw_galaxy_map"
+homepage = "https://github.com/umpire274/sw_galaxy_map"
+documentation = "https://github.com/umpire274/sw_galaxy_map"
+readme = "../../README.md"
+keywords = ["star-wars", "sync", "sqlite", "csv", "navicomputer"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow.workspace = true
