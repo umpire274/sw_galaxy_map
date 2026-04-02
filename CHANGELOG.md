@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.14.0] - 2026-04-02
+
+### ✨ Added
+
+- **Combined search filters** on the `search` command
+    - `--region` (partial match, case-insensitive)
+    - `--sector` (partial match, case-insensitive)
+    - `--grid` (exact, case-insensitive)
+    - `--status` (exact: active, inserted, modified, skipped, deleted, invalid)
+    - `--canon` (show only Canon planets)
+    - `--legends` (show only Legends planets)
+    - Text query is now optional: at least one filter or a query is required
+    - All active filters are combined with AND
+    - Output table now includes a Status column
+    - Result count and filter description shown at the bottom
+- Added `db sync` command integrating the sync crate into the main CLI
+    - Reads a CSV, matches against existing records, updates status fields
+    - Automatically rebuilds `planet_search` and FTS indexes after sync
+    - Supports `--csv`, `--table`, `--delimiter`, `--dry-run`, `--mark-deleted`, `--report`
+    - Single command replaces the manual workflow of running `sw_galaxy_map_sync` + `db rebuild-search`
+- New `SearchFilter` struct in `sw_galaxy_map_core::model` for type-safe filter passing
+- New `search_planets_filtered()` query function with dynamic SQL construction
+- Exposed `sw_galaxy_map_sync` as a library crate (`lib + bin`)
+    - Public API: `run_sync()`, `SyncOptions`, `SyncResult`, `resolve_csv_path()`
+
+### 🔄 Changed
+
+- `search` command query is now `Option<String>` (optional when filters are provided)
+- `validate_search()` refactored to accept a single `&SearchFilter` (Clippy-clean, no more than 7 args)
+- `PlanetSearchRow` now includes `status: Option<String>` field
+- Planet detail panels (TUI) now display Status
+- `sw_galaxy_map_sync` crate restructured as lib + bin (Cargo.toml `[lib]` section added)
+- `sw_galaxy_map_sync` binary now delegates to `run_sync()` from the library
+
+### 🐛 Fixed
+
+- **Fixed broken revival logic in `db update`**: the update flow was reading the legacy `deleted` INTEGER column for
+  revival decisions while `mark_deleted_missing()` only wrote to `status`. A planet marked as deleted via status was
+  never revived because `deleted` stayed at 0. Now the entire `db update` flow uses `status` consistently.
+- **Fixed SQL error in `mark_deleted_missing()`**: the query used table alias `p.status` but the UPDATE had no alias on
+  the `planets` table. Added `IS NULL` handling for planets with no status set.
+- **Fixed dry-run helpers** (`select_missing_active_planets`, `count_missing_active_planets`): were filtering on legacy
+  `deleted = 0` instead of `status`. Aligned to `status IS NULL OR status NOT IN ('deleted', 'skipped', 'invalid')`.
+
+### 🧠 Internal
+
+- `db_get_hash_and_deleted()` renamed to `db_get_hash_and_status()`, returns `Option<String>` instead of `i64`
+- Revival logic checks `matches!(old_status.as_deref(), Some("deleted"))` instead of `old_deleted == 1`
+- All `db_update.rs` queries now use `status` field consistently; legacy `deleted` column is no longer read
+- GUI `validate_search` call updated to use `SearchFilter` with `..Default::default()`
+
+---
+
 ## [0.13.0] - 2026-04-01
 
 ### ✨ Added

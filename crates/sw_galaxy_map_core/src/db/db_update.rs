@@ -206,19 +206,21 @@ fn upsert_planet(tx: &Transaction<'_>, a: &Value) -> Result<()> {
     Ok(())
 }
 
-fn db_get_hash_and_deleted(tx: &Transaction<'_>, fid: i64) -> Result<Option<(String, i64)>> {
+fn db_get_hash_and_status(
+    tx: &Transaction<'_>,
+    fid: i64,
+) -> Result<Option<(String, Option<String>)>> {
     tx.query_row(
-        "SELECT arcgis_hash, deleted FROM planets WHERE FID = ?1",
+        "SELECT arcgis_hash, status FROM planets WHERE FID = ?1",
         [fid],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
     )
     .optional()
     .map_err(Into::into)
 }
 
 fn mark_deleted_missing(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Result<i64> {
-    // Mark planets not in remote feed as deleted=1
-    // For SQLite, best approach: create temp table and join.
+    // Mark planets not in remote feed via status = 'deleted'
     tx.execute_batch(
         "DROP TABLE IF EXISTS __keep_fids; CREATE TEMP TABLE __keep_fids(fid INTEGER PRIMARY KEY);",
     )?;
@@ -234,7 +236,7 @@ fn mark_deleted_missing(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Resul
         r#"
         UPDATE planets
         SET status = 'deleted'
-        WHERE status NOT IN ('deleted', 'skipped', 'invalid')
+        WHERE (status IS NULL OR status NOT IN ('deleted', 'skipped', 'invalid'))
           AND FID NOT IN (SELECT fid FROM __keep_fids)
         "#,
         [],
@@ -398,7 +400,7 @@ pub fn run(
 
         let new_hash = compute_arcgis_hash(a);
 
-        match db_get_hash_and_deleted(&tx, fid)? {
+        match db_get_hash_and_status(&tx, fid)? {
             None => {
                 inserted += 1;
                 if stats && (events.len() < stats_limit * 50) {
@@ -412,8 +414,10 @@ pub fn run(
                     upsert_planet(&tx, a)?;
                 }
             }
-            Some((old_hash, old_deleted)) => {
-                if old_deleted == 1 {
+            Some((old_hash, old_status)) => {
+                let is_deleted = matches!(old_status.as_deref(), Some("deleted"));
+
+                if is_deleted {
                     revived += 1;
                     if stats && (events.len() < stats_limit * 50) {
                         events.push(ChangeEvent {
@@ -555,7 +559,7 @@ pub fn run(
     })
 }
 
-/// Returns top N missing active planets (deleted=0 and not in keep_fids), ordered by FID.
+/// Returns top N missing active planets (not deleted/skipped/invalid and not in keep_fids), ordered by FID.
 /// Used for --stats preview (both dry-run and real).
 fn select_missing_active_planets(
     tx: &Transaction<'_>,
@@ -577,7 +581,7 @@ fn select_missing_active_planets(
         r#"
         SELECT FID, Planet
         FROM planets
-        WHERE deleted = 0
+        WHERE (status IS NULL OR status NOT IN ('deleted', 'skipped', 'invalid'))
           AND FID NOT IN (SELECT fid FROM __keep_fids)
         ORDER BY FID
         LIMIT ?1
@@ -597,10 +601,9 @@ fn select_missing_active_planets(
     Ok(out)
 }
 
-/// Dry-run helper: counts how many active (deleted=0) planets would be marked deleted
+/// Dry-run helper: counts how many active planets would be marked deleted
 /// given the keep_fids set, WITHOUT performing UPDATEs.
 fn count_missing_active_planets(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) -> Result<i64> {
-    // Use the same temp-table strategy as mark_deleted_missing(), but do a SELECT COUNT(*)
     tx.execute_batch(
         "DROP TABLE IF EXISTS __keep_fids; CREATE TEMP TABLE __keep_fids(fid INTEGER PRIMARY KEY);",
     )?;
@@ -616,7 +619,7 @@ fn count_missing_active_planets(tx: &Transaction<'_>, keep_fids: &HashSet<i64>) 
         r#"
         SELECT COUNT(*)
         FROM planets
-        WHERE deleted = 0
+        WHERE (status IS NULL OR status NOT IN ('deleted', 'skipped', 'invalid'))
           AND FID NOT IN (SELECT fid FROM __keep_fids)
         "#,
         [],

@@ -1,30 +1,5 @@
 use serde::Deserialize;
 
-/// Deserialize one official CSV row.
-#[derive(Debug, Deserialize)]
-pub struct OfficialRow {
-    #[serde(rename = "system")]
-    pub system: String,
-
-    #[serde(rename = "sector")]
-    pub sector: Option<String>,
-
-    #[serde(rename = "region")]
-    pub region: Option<String>,
-
-    #[serde(rename = "grid")]
-    pub grid: Option<String>,
-}
-
-/// Internal normalized row used during synchronization.
-#[derive(Debug, Clone)]
-pub struct SyncRow {
-    pub system: String,
-    pub sector: String,
-    pub region: String,
-    pub grid: String,
-}
-
 /// Minimal DB row shape used for matching.
 #[derive(Debug)]
 pub struct DbPlanetRow {
@@ -44,18 +19,6 @@ pub struct DbRow {
     pub region: String,
     pub grid: String,
     pub status: String,
-}
-
-/// Summary counters for the sync run.
-#[derive(Debug, Default)]
-pub struct SyncStats {
-    pub inserted: usize,
-    pub updated_exact: usize,
-    pub updated_suffix: usize,
-    pub invalid_csv_rows: usize,
-    pub invalid_marked: usize,
-    pub skipped_db: usize,
-    pub deleted_logically: usize,
 }
 
 /// Default values used when inserting a new planets row from the official CSV.
@@ -99,6 +62,43 @@ pub struct ReportRow {
     pub sector: String,
     pub region: String,
     pub grid: String,
+}
+
+/// Deserialize one official CSV row.
+#[derive(Debug, Deserialize)]
+pub struct OfficialRow {
+    #[serde(rename = "system")]
+    pub system: String,
+
+    #[serde(rename = "sector")]
+    pub sector: Option<String>,
+
+    #[serde(rename = "region")]
+    pub region: Option<String>,
+
+    #[serde(rename = "grid")]
+    pub grid: Option<String>,
+}
+
+/// Internal normalized row used during synchronization.
+#[derive(Debug, Clone)]
+pub struct SyncRow {
+    pub system: String,
+    pub sector: String,
+    pub region: String,
+    pub grid: String,
+}
+
+/// Summary counters for the sync run.
+#[derive(Debug, Default, Clone)]
+pub struct SyncStats {
+    pub inserted: usize,
+    pub updated_exact: usize,
+    pub updated_suffix: usize,
+    pub invalid_csv_rows: usize,
+    pub invalid_marked: usize,
+    pub skipped_db: usize,
+    pub deleted_logically: usize,
 }
 
 /// Report grouped by status.

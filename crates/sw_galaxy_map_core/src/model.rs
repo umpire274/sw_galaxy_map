@@ -295,6 +295,30 @@ pub struct PlanetSearchRow {
     pub status: Option<String>,
 }
 
+/// Filter criteria for combined planet search.
+///
+/// At least one field must be set (query or any filter).
+/// All active filters are combined with AND.
+#[derive(Debug, Clone, Default)]
+pub struct SearchFilter {
+    /// Text query on planet name / alias (FTS or LIKE).
+    pub query: Option<String>,
+    /// Region filter (LIKE, case-insensitive).
+    pub region: Option<String>,
+    /// Sector filter (LIKE, case-insensitive).
+    pub sector: Option<String>,
+    /// Grid filter (exact, case-insensitive).
+    pub grid: Option<String>,
+    /// Status filter (exact: active, inserted, modified, skipped, deleted).
+    pub status: Option<String>,
+    /// If true, only Canon planets.
+    pub canon: Option<bool>,
+    /// If true, only Legends planets.
+    pub legends: Option<bool>,
+    /// Max results.
+    pub limit: i64,
+}
+
 /// Represents an unknown planet hit near a known planet.
 #[derive(Debug, Clone)]
 pub struct UnknownNearHit {

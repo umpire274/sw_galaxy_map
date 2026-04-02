@@ -28,12 +28,35 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Search planets by text (uses FTS if available, otherwise LIKE)
+    /// Search planets by text and/or filters (uses FTS if available, otherwise LIKE)
     Search {
-        /// Search query (name, description, features, ...)
-        query: String,
+        /// Planet/system name query (optional if filters are provided)
+        query: Option<String>,
 
-        /// Max rows (default: 20)
+        /// Filter by region (partial match, case-insensitive)
+        #[arg(long)]
+        region: Option<String>,
+
+        /// Filter by sector (partial match, case-insensitive)
+        #[arg(long)]
+        sector: Option<String>,
+
+        /// Filter by grid (exact, case-insensitive)
+        #[arg(long)]
+        grid: Option<String>,
+
+        /// Filter by status (active, inserted, modified, skipped, deleted)
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Show only Canon planets
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        canon: bool,
+
+        /// Show only Legends planets
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        legends: bool,
+
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
@@ -152,6 +175,36 @@ pub enum DbCommands {
 
     /// Rebuild the `planet_search` table and FTS index from current `planets` data
     RebuildSearch,
+
+    /// Sync the official Lucasfilm star-systems catalog into the planets table
+    ///
+    /// Reads a CSV, matches against existing records, updates status fields,
+    /// and rebuilds search indexes automatically.
+    Sync {
+        /// Path to the official CSV file
+        #[arg(long)]
+        csv: String,
+
+        /// Target table name
+        #[arg(long, default_value = "planets")]
+        table: String,
+
+        /// CSV delimiter character
+        #[arg(long, default_value = ",")]
+        delimiter: char,
+
+        /// Perform a dry run without changing the database
+        #[arg(long, action = ArgAction::SetTrue)]
+        dry_run: bool,
+
+        /// Mark records not present in CSV as deleted
+        #[arg(long, action = ArgAction::SetTrue)]
+        mark_deleted: bool,
+
+        /// Path for the XLSX sync report (omit to skip report generation)
+        #[arg(long)]
+        report: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
