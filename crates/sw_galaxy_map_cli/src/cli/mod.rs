@@ -14,10 +14,8 @@ use std::path::Path;
 use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport, resolve_db_path};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
-use sw_galaxy_map_core::db::queries::search_planets;
 use sw_galaxy_map_core::model::{NearHit, PlanetSearchRow, RouteLoaded};
 use sw_galaxy_map_core::routing::eta::{RegionBlend, RouteEtaEstimate, estimate_route_eta};
-use sw_galaxy_map_core::utils::normalize_text;
 use sw_galaxy_map_core::validate;
 
 #[derive(Debug, Clone)]
@@ -319,15 +317,90 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
 
             args::DbCommands::RebuildSearch => {
                 let mut con = open_db_migrating(cli.db.clone())?;
+                info("Rebuilding planet_search and FTS indexes...");
                 sw_galaxy_map_core::db::provision::rebuild_search_indexes(&mut con)?;
+                success("planet_search and FTS indexes rebuilt successfully.");
+                Ok(())
+            }
+
+            args::DbCommands::Sync {
+                csv,
+                table,
+                delimiter,
+                dry_run,
+                mark_deleted,
+                report,
+            } => {
+                let csv_path = sw_galaxy_map_sync::resolve_csv_path(csv)?;
+
+                let delimiter_byte = delimiter
+                    .to_string()
+                    .as_bytes()
+                    .first()
+                    .copied()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid delimiter"))?;
+
+                let mut con = open_db_migrating(cli.db.clone())?;
+
+                info(format!("Syncing from CSV: {}", csv_path.display()));
+
+                let opts = sw_galaxy_map_sync::SyncOptions {
+                    csv: csv_path,
+                    table: table.clone(),
+                    delimiter: delimiter_byte,
+                    dry_run: *dry_run,
+                    mark_deleted: *mark_deleted,
+                    report_path: report.clone(),
+                };
+
+                let result = sw_galaxy_map_sync::run_sync(&mut con, &opts)?;
+
+                println!();
+                info("Sync summary:");
+                println!("  Inserted         : {}", result.stats.inserted);
+                println!("  Updated exact    : {}", result.stats.updated_exact);
+                println!("  Updated suffix   : {}", result.stats.updated_suffix);
+                println!("  Invalid CSV rows : {}", result.stats.invalid_csv_rows);
+                println!("  Marked invalid   : {}", result.stats.invalid_marked);
+                println!("  Skipped DB       : {}", result.stats.skipped_db);
+                println!("  Logically deleted: {}", result.stats.deleted_logically);
+
+                if !*dry_run {
+                    println!();
+                    info("Rebuilding planet_search and FTS indexes...");
+                    sw_galaxy_map_core::db::provision::rebuild_search_indexes(&mut con)?;
+                    success("Sync complete. Search indexes rebuilt.");
+                } else {
+                    success("Dry run complete. No changes written.");
+                }
+
                 Ok(())
             }
         },
 
-        args::Commands::Search { query, limit } => {
-            validate::validate_search(query, *limit)?;
+        args::Commands::Search {
+            query,
+            region,
+            sector,
+            grid,
+            status,
+            canon,
+            legends,
+            limit,
+        } => {
+            let filter = sw_galaxy_map_core::model::SearchFilter {
+                query: query.clone(),
+                region: region.clone(),
+                sector: sector.clone(),
+                grid: grid.clone(),
+                status: status.clone(),
+                canon: if *canon { Some(true) } else { None },
+                legends: if *legends { Some(true) } else { None },
+                limit: *limit,
+            };
+            validate::validate_search(&filter)?;
             let con = open_db_migrating(cli.db.clone())?;
-            commands::search::run(&con, query.clone(), *limit)
+            commands::search::run(&con, filter)
         }
 
         args::Commands::Info { planet } => {
@@ -399,6 +472,7 @@ pub(crate) fn build_planet_panel(
         panel_kv("Y", format!("{:.2}", p.y)),
         panel_kv("Canon", if p.canon { "Yes" } else { "No" }),
         panel_kv("Legends", if p.legends { "Yes" } else { "No" }),
+        panel_kv("Status", tui_cell(&p.status)),
     ];
 
     if let Some(alias_list) = aliases
@@ -429,6 +503,7 @@ pub(crate) fn build_near_planet_panel(
         panel_kv("Y", format!("{:.2}", planet.y)),
         panel_kv("Canon", if planet.canon { "Yes" } else { "No" }),
         panel_kv("Legends", if planet.legends { "Yes" } else { "No" }),
+        panel_kv("Status", tui_cell(&planet.status)),
     ];
 
     if let Some(alias_list) = aliases
@@ -638,18 +713,40 @@ pub(crate) fn run_one_shot_for_tui(
     cmd: &args::Commands,
 ) -> Result<TuiCommandOutput> {
     match cmd {
-        args::Commands::Search { query, limit } => {
-            validate::validate_search(query, *limit)?;
+        args::Commands::Search {
+            query,
+            region,
+            sector,
+            grid,
+            status,
+            canon,
+            legends,
+            limit,
+        } => {
+            let filter = sw_galaxy_map_core::model::SearchFilter {
+                query: query.clone(),
+                region: region.clone(),
+                sector: sector.clone(),
+                grid: grid.clone(),
+                status: status.clone(),
+                canon: if *canon { Some(true) } else { None },
+                legends: if *legends { Some(true) } else { None },
+                limit: *limit,
+            };
+            validate::validate_search(&filter)?;
             let con = open_db_migrating(cli.db.clone())?;
 
-            let qn = normalize_text(query);
-            let rows = search_planets(&con, &qn, *limit)?;
+            let rows = sw_galaxy_map_core::db::queries::search_planets_filtered(&con, &filter)?;
+
+            let query_label = query.as_deref().unwrap_or("(filter)");
 
             let mut out = tui_default_output();
 
             if rows.is_empty() {
-                out.log_lines
-                    .push(format!("Search result for \"{}\": no planets found", query));
+                out.log_lines.push(format!(
+                    "Search result for \"{}\": no planets found",
+                    query_label
+                ));
                 return Ok(out);
             }
 
@@ -657,8 +754,10 @@ pub(crate) fn run_one_shot_for_tui(
                 let planet = &rows[0];
                 let (title, lines) = build_planet_panel(planet, None);
 
-                out.log_lines
-                    .push(format!("Search result for \"{}\": 1 planet found", query));
+                out.log_lines.push(format!(
+                    "Search result for \"{}\": 1 planet found",
+                    query_label
+                ));
                 out.log_lines
                     .push(format!("Displaying result: {}", planet.name));
 
@@ -670,7 +769,7 @@ pub(crate) fn run_one_shot_for_tui(
 
             out.log_lines.push(format!(
                 "Search result for \"{}\": {} planets found",
-                query,
+                query_label,
                 rows.len()
             ));
             out.log_lines.push(String::new());

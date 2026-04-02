@@ -59,59 +59,92 @@ pub fn validate_near(
          {TIP_NEGATIVE_COORDS}"
     )
 }
+pub fn validate_search(filter: &crate::model::SearchFilter) -> Result<()> {
+    validate_limit(filter.limit, "search")?;
 
-pub fn validate_search(query: &str, limit: i64) -> Result<()> {
-    if query.trim().is_empty() {
-        bail!("Search query cannot be empty.");
+    let has_query = filter
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some();
+
+    let has_filter = filter.region.is_some()
+        || filter.sector.is_some()
+        || filter.grid.is_some()
+        || filter.status.is_some()
+        || filter.canon == Some(true)
+        || filter.legends == Some(true);
+
+    if !has_query && !has_filter {
+        bail!(
+            "search requires at least a query or one filter (--region, --sector, --grid, --status, --canon, --legends)"
+        );
     }
-    if limit <= 0 {
-        bail!("--limit must be > 0.");
+
+    if let Some(st) = filter
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        const VALID: &[&str] = &[
+            "active", "inserted", "modified", "skipped", "deleted", "invalid",
+        ];
+        if !VALID.iter().any(|v| v.eq_ignore_ascii_case(st)) {
+            bail!(
+                "invalid --status value '{}'. Valid values: {}",
+                st,
+                VALID.join(", ")
+            );
+        }
     }
+
     Ok(())
 }
 
-pub fn validate_route_id(route_id: i64, ctx: &str) -> Result<()> {
+pub fn validate_route_id(route_id: i64, ctx: &str) -> anyhow::Result<()> {
     if route_id <= 0 {
-        bail!("Invalid route id for {ctx}: {route_id} (must be > 0)");
+        anyhow::bail!("Invalid route id for {ctx}: {route_id} (must be > 0)");
     }
     Ok(())
 }
 
-pub fn validate_route_compute(from: &str, to: &str) -> Result<()> {
+pub fn validate_route_compute(from: &str, to: &str) -> anyhow::Result<()> {
     let f = from.trim();
     let t = to.trim();
 
     if f.is_empty() || t.is_empty() {
-        bail!("FROM and TO must be non-empty");
+        anyhow::bail!("FROM and TO must be non-empty");
     }
     if f.eq_ignore_ascii_case(t) {
-        bail!("FROM and TO must be different");
+        anyhow::bail!("FROM and TO must be different");
     }
     Ok(())
 }
 
-pub fn validate_route_planets(planets: &[String]) -> Result<()> {
+pub fn validate_route_planets(planets: &[String]) -> anyhow::Result<()> {
     if planets.len() < 2 {
-        bail!("Route compute requires at least two planets.");
+        anyhow::bail!("Route compute requires at least two planets.");
     }
     for (idx, planet) in planets.iter().enumerate() {
         if planet.trim().is_empty() {
-            bail!("Planet {} cannot be empty.", idx + 1);
+            anyhow::bail!("Planet {} cannot be empty.", idx + 1);
         }
     }
     for window in planets.windows(2) {
         let from = window[0].trim();
         let to = window[1].trim();
         if from.eq_ignore_ascii_case(to) {
-            bail!("Adjacent planets must be different ({} → {}).", from, to);
+            anyhow::bail!("Adjacent planets must be different ({} → {}).", from, to);
         }
     }
     Ok(())
 }
 
-pub fn validate_limit(limit: i64, ctx: &str) -> Result<()> {
+pub fn validate_limit(limit: i64, ctx: &str) -> anyhow::Result<()> {
     if limit <= 0 {
-        bail!("Invalid limit for {ctx}: {limit} (must be > 0)");
+        anyhow::bail!("Invalid limit for {ctx}: {limit} (must be > 0)");
     }
     Ok(())
 }

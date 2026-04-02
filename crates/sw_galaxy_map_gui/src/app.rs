@@ -201,7 +201,12 @@ impl NavicomputerApp {
                     i += 1;
                 }
 
-                validate::validate_search(query.as_deref().unwrap_or(""), limit)?;
+                let filter = sw_galaxy_map_core::model::SearchFilter {
+                    query: query.clone(),
+                    limit,
+                    ..Default::default()
+                };
+                validate::validate_search(&filter)?;
             }
 
             "route" => {
@@ -806,7 +811,7 @@ impl NavicomputerApp {
                     egui::RichText::new(
                         "Tip: you can also run `--help`, `route --help`, etc. directly in the CMD box.",
                     )
-                    .weak(),
+                        .weak(),
                 );
 
                 ui.add_space(6.0);
