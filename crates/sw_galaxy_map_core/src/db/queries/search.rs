@@ -1,7 +1,10 @@
 use crate::db::has_table;
 use crate::model::{PlanetSearchRow, SearchFilter};
+use crate::utils::fuzzy::fuzzy_search;
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::types::Value;
+use rusqlite::{Connection, params_from_iter};
+use std::collections::HashMap;
 
 /// Searches planets by normalized free-text query.
 ///
@@ -270,4 +273,165 @@ pub fn search_planets_filtered(
 
     let items = rows.collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
     Ok(items)
+}
+
+/// Performs fuzzy search while preserving all active structured filters.
+///
+/// Strategy:
+/// 1. get fuzzy candidate FIDs in ranked order
+/// 2. hydrate them as `PlanetSearchRow`
+/// 3. apply structured filters in SQL
+/// 4. restore original fuzzy order
+/// 5. truncate to `filter.limit`
+pub fn fuzzy_search_filtered(
+    con: &Connection,
+    query_norm: &str,
+    max_distance: usize,
+    filter: &SearchFilter,
+) -> Result<Vec<PlanetSearchRow>> {
+    if query_norm.trim().is_empty() || filter.limit <= 0 {
+        return Ok(Vec::new());
+    }
+
+    // Pull more than the final limit so post-filtering still has enough candidates.
+    let candidate_limit = (filter.limit.max(1) as usize).saturating_mul(10);
+
+    let fuzzy_hits = fuzzy_search(
+        con,
+        query_norm,
+        max_distance,
+        candidate_limit,
+        filter.status.as_deref(),
+    )?;
+
+    if fuzzy_hits.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ordered_fids: Vec<i64> = fuzzy_hits.iter().map(|h| h.fid).collect();
+
+    let mut sql = String::from(
+        r#"
+        SELECT
+            p.FID,
+            p.Planet,
+            p.Region,
+            p.Sector,
+            p.System,
+            p.Grid,
+            p.X,
+            p.Y,
+            COALESCE(p.Canon, 0),
+            COALESCE(p.Legends, 0),
+            p.status
+        FROM planets p
+        WHERE p.FID IN (
+        "#,
+    );
+
+    let mut params: Vec<Value> = Vec::new();
+
+    for (idx, fid) in ordered_fids.iter().enumerate() {
+        if idx > 0 {
+            sql.push_str(", ");
+        }
+        sql.push('?');
+        params.push(Value::Integer(*fid));
+    }
+
+    sql.push_str(")\n");
+
+    // Status filter
+    //
+    // Important:
+    // - if user explicitly requested a status, honor that exact status
+    // - otherwise preserve the historical "active only" behavior
+    if let Some(st) = filter
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sql.push_str(" AND p.status = ? COLLATE NOCASE\n");
+        params.push(Value::Text(st.to_string()));
+    } else {
+        sql.push_str(
+            " AND (p.status IS NULL OR p.status NOT IN ('deleted', 'skipped', 'invalid'))\n",
+        );
+    }
+
+    if let Some(region) = filter
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sql.push_str(" AND p.Region LIKE ? COLLATE NOCASE\n");
+        params.push(Value::Text(format!("%{}%", region)));
+    }
+
+    if let Some(sector) = filter
+        .sector
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sql.push_str(" AND p.Sector LIKE ? COLLATE NOCASE\n");
+        params.push(Value::Text(format!("%{}%", sector)));
+    }
+
+    if let Some(grid) = filter
+        .grid
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sql.push_str(" AND p.Grid = ? COLLATE NOCASE\n");
+        params.push(Value::Text(grid.to_string()));
+    }
+
+    if filter.canon == Some(true) {
+        sql.push_str(" AND COALESCE(p.Canon, 0) = 1\n");
+    }
+
+    if filter.legends == Some(true) {
+        sql.push_str(" AND COALESCE(p.Legends, 0) = 1\n");
+    }
+
+    let mut stmt = con
+        .prepare(&sql)
+        .context("Failed to prepare fuzzy filtered hydration query")?;
+
+    let rows = stmt
+        .query_map(params_from_iter(params), |r| {
+            Ok(PlanetSearchRow {
+                fid: r.get::<_, i64>(0)?,
+                name: r.get::<_, String>(1)?,
+                region: r.get::<_, Option<String>>(2)?,
+                sector: r.get::<_, Option<String>>(3)?,
+                system: r.get::<_, Option<String>>(4)?,
+                grid: r.get::<_, Option<String>>(5)?,
+                x: r.get(6)?,
+                y: r.get(7)?,
+                canon: r.get(8)?,
+                legends: r.get(9)?,
+                status: r.get::<_, Option<String>>(10)?,
+            })
+        })
+        .context("Failed to execute fuzzy filtered hydration query")?;
+
+    let hydrated = rows.collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+
+    // Restore original fuzzy ranking after SQL hydration/filtering.
+    let rank: HashMap<i64, usize> = ordered_fids
+        .iter()
+        .enumerate()
+        .map(|(idx, fid)| (*fid, idx))
+        .collect();
+
+    let mut out = hydrated;
+    out.sort_by_key(|row| rank.get(&row.fid).copied().unwrap_or(usize::MAX));
+    out.truncate(filter.limit as usize);
+
+    Ok(out)
 }

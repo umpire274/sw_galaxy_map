@@ -906,6 +906,7 @@ pub(crate) fn run_one_shot_for_tui(
                         &qn,
                         3,
                         filter.limit as usize,
+                        filter.status.as_deref(),
                     )?;
 
                     if hits.is_empty() {
@@ -977,7 +978,8 @@ pub(crate) fn run_one_shot_for_tui(
                     .map(sw_galaxy_map_core::utils::normalize_text)
                     .filter(|s| !s.is_empty())
                 {
-                    let hits = sw_galaxy_map_core::utils::fuzzy::fuzzy_search(&con, &qn, 3, 5)?;
+                    let hits =
+                        sw_galaxy_map_core::utils::fuzzy::fuzzy_search(&con, &qn, 3, 5, None)?;
                     if !hits.is_empty() {
                         out.log_lines.push(format!(
                             "Search result for \"{}\": no planets found",

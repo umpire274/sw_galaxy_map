@@ -2,9 +2,8 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::ui::{info, warning};
-use sw_galaxy_map_core::db::queries::search_planets_filtered;
+use sw_galaxy_map_core::db::queries::{fuzzy_search_filtered, search_planets_filtered};
 use sw_galaxy_map_core::model::SearchFilter;
-use sw_galaxy_map_core::utils::fuzzy::{fuzzy_search, resolve_fuzzy_hits};
 use sw_galaxy_map_core::utils::normalize_text;
 
 /// Max Levenshtein distance for fuzzy matching.
@@ -129,9 +128,9 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
         }
 
         let qn = normalize_text(query_text);
-        let hits = fuzzy_search(con, &qn, FUZZY_MAX_DISTANCE, filter.limit as usize)?;
+        let rows = fuzzy_search_filtered(con, &qn, FUZZY_MAX_DISTANCE, &filter)?;
 
-        if hits.is_empty() {
+        if rows.is_empty() {
             warning(format!(
                 "No fuzzy matches found for: {} (max distance: {})",
                 description, FUZZY_MAX_DISTANCE
@@ -139,17 +138,9 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
             return Ok(());
         }
 
-        let resolved = resolve_fuzzy_hits(con, &hits)?;
-        let rows: Vec<_> = resolved.iter().map(|(r, _)| r.clone()).collect();
-
         info(format!("Fuzzy search results for: {}", description));
         println!();
         print_table(&rows);
-
-        println!();
-        for (row, dist) in &resolved {
-            println!("  {} (distance: {})", row.name, dist);
-        }
 
         println!("\n{} fuzzy match(es) for: {}", rows.len(), description);
 
@@ -165,13 +156,13 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
         // --- Automatic "Did you mean?" suggestion ---
         if let Some(query_text) = filter.query.as_deref().filter(|s| !s.trim().is_empty()) {
             let qn = normalize_text(query_text);
-            let hits = fuzzy_search(con, &qn, FUZZY_MAX_DISTANCE, 5)?;
+            let hits = fuzzy_search_filtered(con, &qn, FUZZY_MAX_DISTANCE, &filter)?;
 
             if !hits.is_empty() {
                 println!();
                 info("Did you mean?");
                 for hit in &hits {
-                    println!("  - {} (distance: {})", hit.name, hit.distance);
+                    println!("  - {}", hit.name);
                 }
                 println!();
                 println!("Tip: use --fuzzy to search with typo tolerance.");
