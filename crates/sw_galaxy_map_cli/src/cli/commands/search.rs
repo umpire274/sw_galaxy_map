@@ -1,9 +1,14 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::ui::warning;
+use crate::ui::{info, warning};
 use sw_galaxy_map_core::db::queries::search_planets_filtered;
 use sw_galaxy_map_core::model::SearchFilter;
+use sw_galaxy_map_core::utils::fuzzy::{fuzzy_search, resolve_fuzzy_hits};
+use sw_galaxy_map_core::utils::normalize_text;
+
+/// Max Levenshtein distance for fuzzy matching.
+const FUZZY_MAX_DISTANCE: usize = 3;
 
 /// Return `-` if the value is None or empty/whitespace.
 fn cell(opt: &Option<String>) -> &str {
@@ -42,6 +47,9 @@ fn describe_filter(filter: &SearchFilter) -> String {
     if filter.legends == Some(true) {
         parts.push("legends".to_string());
     }
+    if filter.fuzzy {
+        parts.push("fuzzy".to_string());
+    }
 
     if parts.is_empty() {
         "(no criteria)".to_string()
@@ -50,16 +58,7 @@ fn describe_filter(filter: &SearchFilter) -> String {
     }
 }
 
-pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
-    let description = describe_filter(&filter);
-    let rows = search_planets_filtered(con, &filter)?;
-
-    if rows.is_empty() {
-        warning(format!("No results found for: {}", description));
-        return Ok(());
-    }
-
-    // --- Compute column widths (monospace-friendly)
+fn print_table(rows: &[sw_galaxy_map_core::model::PlanetSearchRow]) {
     let fid_w: usize = 8;
 
     let name_vals: Vec<&str> = rows.iter().map(|p| p.name.as_str()).collect();
@@ -84,7 +83,6 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
     let x_w = col_width_from_strs(&x_refs, "X".len().max(8));
     let y_w = col_width_from_strs(&y_refs, "Y".len().max(8));
 
-    // --- Header
     println!(
         "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {status:<status_w$}  {x:>x_w$}  {y:>y_w$}",
         fid = "FID",
@@ -103,8 +101,7 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
         "", "", "", "", "", "", "", "", ""
     );
 
-    // --- Rows
-    for p in &rows {
+    for p in rows {
         println!(
             "{fid:>fid_w$}   {name:<name_w$}  {region:<region_w$}  {sector:<sector_w$}  {system:<system_w$}  {grid:<grid_w$}  {status:<status_w$}  {x:>x_w$}  {y:>y_w$}",
             fid = p.fid,
@@ -118,7 +115,73 @@ pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
             y = format!("{:.2}", p.y),
         );
     }
+}
 
+pub fn run(con: &Connection, filter: SearchFilter) -> Result<()> {
+    let description = describe_filter(&filter);
+
+    // --- Explicit fuzzy mode: skip exact search, go straight to fuzzy ---
+    if filter.fuzzy {
+        let query_text = filter.query.as_deref().unwrap_or("");
+        if query_text.trim().is_empty() {
+            warning("--fuzzy requires a text query");
+            return Ok(());
+        }
+
+        let qn = normalize_text(query_text);
+        let hits = fuzzy_search(con, &qn, FUZZY_MAX_DISTANCE, filter.limit as usize)?;
+
+        if hits.is_empty() {
+            warning(format!(
+                "No fuzzy matches found for: {} (max distance: {})",
+                description, FUZZY_MAX_DISTANCE
+            ));
+            return Ok(());
+        }
+
+        let resolved = resolve_fuzzy_hits(con, &hits)?;
+        let rows: Vec<_> = resolved.iter().map(|(r, _)| r.clone()).collect();
+
+        info(format!("Fuzzy search results for: {}", description));
+        println!();
+        print_table(&rows);
+
+        println!();
+        for (row, dist) in &resolved {
+            println!("  {} (distance: {})", row.name, dist);
+        }
+
+        println!("\n{} fuzzy match(es) for: {}", rows.len(), description);
+
+        return Ok(());
+    }
+
+    // --- Standard exact search ---
+    let rows = search_planets_filtered(con, &filter)?;
+
+    if rows.is_empty() {
+        warning(format!("No results found for: {}", description));
+
+        // --- Automatic "Did you mean?" suggestion ---
+        if let Some(query_text) = filter.query.as_deref().filter(|s| !s.trim().is_empty()) {
+            let qn = normalize_text(query_text);
+            let hits = fuzzy_search(con, &qn, FUZZY_MAX_DISTANCE, 5)?;
+
+            if !hits.is_empty() {
+                println!();
+                info("Did you mean?");
+                for hit in &hits {
+                    println!("  - {} (distance: {})", hit.name, hit.distance);
+                }
+                println!();
+                println!("Tip: use --fuzzy to search with typo tolerance.");
+            }
+        }
+
+        return Ok(());
+    }
+
+    print_table(&rows);
     println!("\n{} result(s) for: {}", rows.len(), description);
 
     Ok(())

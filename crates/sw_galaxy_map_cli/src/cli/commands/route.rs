@@ -751,6 +751,13 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
         return Ok(());
     }
 
+    // --- CSV polyline export ---
+    if let Some(csv_path) = &args.csv {
+        export_polyline_csv(&loaded, csv_path)?;
+        eprintln!("CSV polyline written to {}", csv_path.display());
+        return Ok(());
+    }
+
     let style = Style::default();
     let c = Colors::new(&style);
 
@@ -777,22 +784,21 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
     if let Some(len) = loaded.route.length {
         println!("Length: {:.3} parsec", len);
 
-        if let Some(eta) = compute_eta_summary(
+        // --- Structured ETA breakdown ---
+        print_eta_breakdown(
             con,
             &loaded,
             args.hyperdrive_class,
             parse_region_blend(&args.region_blend),
             DEFAULT_DETOUR_COUNT_BASE,
             DEFAULT_SEVERITY_K,
-        ) {
-            println!("{}", eta);
-        }
+            &c,
+        );
 
         // Optional: sublight ETA (km/s), useful for local-system travel heuristics.
         if let Some(kmps) = args.sublight_kmps
             && kmps > 0.0
         {
-            // Use geometric polyline length for consistency with the hyperspace ETA model.
             let route_len_geom: f64 =
                 polyline_length_waypoints_parsec(&loaded.waypoints, |w| (w.x, w.y));
 
@@ -822,6 +828,17 @@ fn run_explain(con: &Connection, args: &RouteExplainArgs) -> Result<()> {
             "  weights: turn={:.3}  back={:.3}  proximity={:.3}  proximity_margin={:.3}",
             o.turn_weight, o.back_weight, o.proximity_weight, o.proximity_margin
         );
+    }
+
+    // --- Waypoint-by-waypoint with segment/cumulative distances ---
+    println!();
+    println!("Waypoints: {} (segment distances)", loaded.waypoints.len());
+    print_waypoint_segments(&loaded.waypoints, &c);
+
+    // --- Detour summary ---
+    if !loaded.detours.is_empty() {
+        println!();
+        print_detour_summary(&loaded, &c);
     }
 
     println!();
@@ -1345,4 +1362,330 @@ pub(crate) fn resolve_show_for_tui(con: &Connection, route_id: i64) -> Result<Ro
         .ok_or_else(|| anyhow::anyhow!("Route not found: id={}", route_id))?;
 
     Ok(RouteShowTuiData { loaded })
+}
+
+// ---------------------------------------------------------------------------
+// Enriched explain helpers (v0.15.0)
+// ---------------------------------------------------------------------------
+
+/// Print a structured ETA breakdown with regions, compression factors,
+/// and each detour multiplier on separate lines.
+fn print_eta_breakdown(
+    con: &Connection,
+    loaded: &RouteLoaded,
+    hyperdrive_class: f64,
+    blend: RegionBlend,
+    detour_count_base: f64,
+    severity_k: f64,
+    c: &Colors,
+) {
+    if loaded.waypoints.len() < 2 || hyperdrive_class <= 0.0 {
+        return;
+    }
+
+    let route_len: f64 = polyline_length_waypoints_parsec(&loaded.waypoints, |w| (w.x, w.y));
+    let a = loaded.waypoints.first().unwrap();
+    let b = loaded.waypoints.last().unwrap();
+    let direct = geom_dist(Point::new(a.x, a.y), Point::new(b.x, b.y));
+
+    if direct <= 0.0 || route_len <= 0.0 {
+        return;
+    }
+
+    // Load endpoint planets
+    let from_p = match queries::get_planet_by_fid(con, loaded.route.from_planet_fid)
+        .ok()
+        .flatten()
+    {
+        Some(p) => p,
+        None => return,
+    };
+    let to_p = match queries::get_planet_by_fid(con, loaded.route.to_planet_fid)
+        .ok()
+        .flatten()
+    {
+        Some(p) => p,
+        None => return,
+    };
+
+    let from_region = extract_galactic_region(&from_p).unwrap_or(GalacticRegion::OuterRim);
+    let to_region = extract_galactic_region(&to_p).unwrap_or(GalacticRegion::OuterRim);
+
+    let cf_from = from_region.base_compression_factor();
+    let cf_to = to_region.base_compression_factor();
+
+    let cf_base = match blend {
+        RegionBlend::Avg => (cf_from + cf_to) / 2.0,
+        RegionBlend::Conservative => cf_from * 0.4 + cf_to * 0.6,
+        RegionBlend::Weighted(w) => {
+            let w = w.clamp(0.0, 1.0);
+            cf_from * w + cf_to * (1.0 - w)
+        }
+    };
+
+    // Detour multipliers
+    let detour_params = DetourPenaltyParams::default();
+    let mult_geom = detour_penalty_multiplier(direct, route_len, detour_params);
+
+    let detour_count = loaded.detours.len() as i32;
+    let mult_count = detour_count_base.powi(detour_count);
+
+    let severity_sum: f64 = loaded
+        .detours
+        .iter()
+        .map(|d| {
+            let req = d.offset_used.max(1e-9);
+            ((req - d.closest_dist) / req).clamp(0.0, 1.0)
+        })
+        .sum();
+
+    let mult_severity = 1.0 / (1.0 + severity_k * severity_sum);
+    let mult_total = (mult_geom * mult_count * mult_severity).clamp(detour_params.floor, 1.0);
+
+    let compression = (cf_base * mult_total).max(5.0);
+    let eta_hours = estimate_travel_time_hours(route_len, compression, hyperdrive_class);
+
+    let overhead_pct = if direct > 0.0 {
+        ((route_len / direct) - 1.0) * 100.0
+    } else {
+        0.0
+    };
+
+    println!();
+    println!("ETA Breakdown:");
+    println!("  Route length     : {:.3} parsec", route_len);
+    println!("  Direct distance  : {:.3} parsec", direct);
+    println!("  Route overhead   : +{:.1}%", overhead_pct);
+    println!("  Hyperdrive class : {:.1}", hyperdrive_class);
+    println!();
+    println!("  Regions:");
+    println!("    Origin         : {:?} (CF={:.1})", from_region, cf_from);
+    println!("    Destination    : {:?} (CF={:.1})", to_region, cf_to);
+    println!("    Blend policy   : {:?}", blend);
+    println!("    Base CF        : {:.2}", cf_base);
+    println!();
+    println!("  Detour multipliers:");
+    println!(
+        "    Geometric      : {:.4} (route/direct ratio penalty)",
+        mult_geom
+    );
+    println!(
+        "    Count ({} det)  : {:.4} (base={:.2}^{})",
+        loaded.detours.len(),
+        mult_count,
+        detour_count_base,
+        detour_count
+    );
+    println!(
+        "    Severity       : {:.4} (sum={:.3}, k={:.2})",
+        mult_severity, severity_sum, severity_k
+    );
+    println!("    Combined       : {:.4}", mult_total);
+    println!();
+    println!("  Effective CF     : {:.2}", compression);
+    println!(
+        "  {} ETA: {} ({:.1} h, ~{:.1} d)",
+        c.ok("→"),
+        format_duration_compact(eta_hours),
+        eta_hours,
+        eta_hours / 24.0
+    );
+}
+
+/// Print waypoint-by-waypoint table with segment distance, cumulative distance,
+/// and waypoint label.
+fn print_waypoint_segments(waypoints: &[sw_galaxy_map_core::model::RouteWaypointRow], c: &Colors) {
+    if waypoints.is_empty() {
+        return;
+    }
+
+    let last_seq = waypoints.len().saturating_sub(1);
+    let mut cumulative = 0.0_f64;
+
+    // Header
+    println!(
+        "  {:>3}  {:>10}  {:>10}  {:>10}  {:>10}  Label",
+        "Seq", "X", "Y", "Segment", "Cumulative"
+    );
+    println!(
+        "  {:->3}  {:->10}  {:->10}  {:->10}  {:->10}  {:->20}",
+        "", "", "", "", "", ""
+    );
+
+    for (i, w) in waypoints.iter().enumerate() {
+        let segment_dist = if i == 0 {
+            0.0
+        } else {
+            let prev = &waypoints[i - 1];
+            geom_dist(Point::new(prev.x, prev.y), Point::new(w.x, w.y))
+        };
+
+        cumulative += segment_dist;
+
+        let is_start = i == 0;
+        let is_end = i == last_seq;
+
+        let label = if is_start {
+            "Start".to_string()
+        } else if is_end {
+            "End".to_string()
+        } else {
+            match (w.waypoint_name.as_deref(), w.waypoint_kind.as_deref()) {
+                (Some(name), Some(kind)) => format!("{} ({})", name, kind),
+                (Some(name), None) => name.to_string(),
+                _ => "waypoint".to_string(),
+            }
+        };
+
+        let colored_label = if is_start {
+            c.label_start(label)
+        } else if is_end {
+            c.label_end(label)
+        } else {
+            c.label_detour(label)
+        };
+
+        let seg_str = if i == 0 {
+            "-".to_string()
+        } else {
+            format!("{:.3}", segment_dist)
+        };
+
+        println!(
+            "  {:>3}  {:>10.3}  {:>10.3}  {:>10}  {:>10.3}  {}",
+            w.seq, w.x, w.y, seg_str, cumulative, colored_label
+        );
+    }
+}
+
+/// Print aggregate detour statistics: overhead %, average penalty, worst detour.
+fn print_detour_summary(loaded: &RouteLoaded, c: &Colors) {
+    let detours = &loaded.detours;
+    if detours.is_empty() {
+        return;
+    }
+
+    let route_len: f64 = polyline_length_waypoints_parsec(&loaded.waypoints, |w| (w.x, w.y));
+    let a = loaded.waypoints.first().unwrap();
+    let b = loaded.waypoints.last().unwrap();
+    let direct = geom_dist(Point::new(a.x, a.y), Point::new(b.x, b.y));
+
+    let overhead_parsec = route_len - direct;
+    let overhead_pct = if direct > 0.0 {
+        (overhead_parsec / direct) * 100.0
+    } else {
+        0.0
+    };
+
+    let avg_score: f64 = detours.iter().map(|d| d.score_total).sum::<f64>() / detours.len() as f64;
+
+    let worst = detours.iter().max_by(|a, b| {
+        a.score_total
+            .partial_cmp(&b.score_total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let avg_severity: f64 = detours
+        .iter()
+        .map(|d| {
+            let req = d.offset_used.max(1e-9);
+            ((req - d.closest_dist) / req).clamp(0.0, 1.0)
+        })
+        .sum::<f64>()
+        / detours.len() as f64;
+
+    let exhausted_count = detours.iter().filter(|d| d.tries_exhausted == 1).count();
+
+    println!("Detour Summary:");
+    println!("  Total detours    : {}", detours.len());
+    println!(
+        "  Route overhead   : +{:.3} parsec (+{:.1}% vs direct)",
+        overhead_parsec, overhead_pct
+    );
+    println!("  Avg score        : {:.3}", avg_score);
+    println!("  Avg severity     : {:.3}", avg_severity);
+
+    if let Some(w) = worst {
+        println!(
+            "  Worst detour     : det#{} obstacle={} score={:.3}",
+            w.idx,
+            c.obstacle(w.obstacle_name.clone()),
+            w.score_total
+        );
+    }
+
+    if exhausted_count > 0 {
+        println!(
+            "  Exhausted tries  : {}/{} ({})",
+            c.err(exhausted_count.to_string()),
+            detours.len(),
+            c.warn("may indicate suboptimal detours")
+        );
+    } else {
+        println!(
+            "  Exhausted tries  : 0/{} ({})",
+            detours.len(),
+            c.ok("all resolved cleanly")
+        );
+    }
+}
+
+/// Export the route polyline as a CSV file.
+///
+/// Columns: seq, x, y, segment_parsec, cumulative_parsec, label
+fn export_polyline_csv(loaded: &RouteLoaded, path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut f = fs::File::create(path)?;
+
+    // Header
+    writeln!(f, "seq,x,y,segment_parsec,cumulative_parsec,label")?;
+
+    let last_seq = loaded.waypoints.len().saturating_sub(1);
+    let mut cumulative = 0.0_f64;
+
+    for (i, w) in loaded.waypoints.iter().enumerate() {
+        let segment_dist = if i == 0 {
+            0.0
+        } else {
+            let prev = &loaded.waypoints[i - 1];
+            geom_dist(Point::new(prev.x, prev.y), Point::new(w.x, w.y))
+        };
+
+        cumulative += segment_dist;
+
+        let is_start = i == 0;
+        let is_end = i == last_seq;
+
+        let label = if is_start {
+            "Start".to_string()
+        } else if is_end {
+            "End".to_string()
+        } else {
+            match (w.waypoint_name.as_deref(), w.waypoint_kind.as_deref()) {
+                (Some(name), Some(kind)) => format!("{} ({})", name, kind),
+                (Some(name), None) => name.to_string(),
+                _ => "waypoint".to_string(),
+            }
+        };
+
+        // Escape label for CSV (wrap in quotes if it contains comma or quotes)
+        let label_csv = if label.contains(',') || label.contains('"') {
+            format!("\"{}\"", label.replace('"', "\"\""))
+        } else {
+            label
+        };
+
+        writeln!(
+            f,
+            "{},{:.6},{:.6},{:.6},{:.6},{}",
+            w.seq, w.x, w.y, segment_dist, cumulative, label_csv
+        )?;
+    }
+
+    Ok(())
 }
