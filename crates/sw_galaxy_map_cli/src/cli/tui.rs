@@ -311,7 +311,7 @@ fn handle_key(key: KeyEvent, app: &mut App) -> bool {
                     return false;
                 }
 
-                match crate::cli::split_args(&command) {
+                match crate::cli::shell::split_args(&command) {
                     Ok(tokens) => {
                         let mut argv: Vec<String> = Vec::with_capacity(tokens.len() + 3);
                         argv.push("sw_galaxy_map".to_string());
@@ -327,7 +327,7 @@ fn handle_key(key: KeyEvent, app: &mut App) -> bool {
                         match crate::cli::args::Cli::try_parse_from(argv) {
                             Ok(cli) => {
                                 if let Some(ref cmd) = cli.cmd {
-                                    match crate::cli::run_one_shot_for_tui(&cli, cmd) {
+                                    match crate::tui::bridge::run_one_shot_for_tui(&cli, cmd) {
                                         Ok(out) => {
                                             let crate::cli::TuiCommandOutput {
                                                 log_lines,

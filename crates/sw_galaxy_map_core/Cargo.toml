@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_core"
-version.workspace = true
+version = "0.15.1"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

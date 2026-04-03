@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod tui;
 pub mod ui;
 
 use crate::cli::args::Cli;
