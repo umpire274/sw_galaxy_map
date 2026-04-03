@@ -5,6 +5,10 @@ pub mod export;
 pub mod tui;
 pub mod typewriter;
 
+use crate::cli::commands::route::list::resolve_list_for_tui;
+
+use crate::cli::commands::route::resolve_show_for_tui;
+use crate::cli::commands::route::types::RouteListTuiItem;
 use crate::ui::{error, info, success, warning};
 use anyhow::Result;
 use clap::Parser;
@@ -29,7 +33,7 @@ pub(crate) struct TuiCommandOutput {
     pub planet2_lines: Vec<String>,
     pub search_results: Vec<PlanetSearchRow>,
     pub near_results: Vec<NearHit>,
-    pub route_list_results: Vec<commands::route::RouteListTuiItem>,
+    pub route_list_results: Vec<RouteListTuiItem>,
 }
 
 pub(crate) enum NavigationPanelKind {
@@ -530,7 +534,7 @@ pub(crate) fn build_near_planet_panel(
 
 pub(crate) fn build_route_show_output(
     con: &rusqlite::Connection,
-    loaded: &sw_galaxy_map_core::model::RouteLoaded,
+    loaded: &RouteLoaded,
 ) -> Result<TuiCommandOutput> {
     let mut out = tui_default_output();
 
@@ -896,7 +900,7 @@ pub(crate) fn run_one_shot_for_tui(
 
             // --- Explicit fuzzy mode: resolve and show as selectable results ---
             if filter.fuzzy {
-                if let Some(qn) = query
+                return if let Some(qn) = query
                     .as_deref()
                     .map(sw_galaxy_map_core::utils::normalize_text)
                     .filter(|s| !s.is_empty())
@@ -906,6 +910,7 @@ pub(crate) fn run_one_shot_for_tui(
                         &qn,
                         3,
                         filter.limit as usize,
+                        filter.status.as_deref(),
                     )?;
 
                     if hits.is_empty() {
@@ -960,12 +965,12 @@ pub(crate) fn run_one_shot_for_tui(
 
                     out.search_results = search_rows;
 
-                    return Ok(out);
+                    Ok(out)
                 } else {
                     out.log_lines
                         .push("--fuzzy requires a text query".to_string());
-                    return Ok(out);
-                }
+                    Ok(out)
+                };
             }
 
             let rows = sw_galaxy_map_core::db::queries::search_planets_filtered(&con, &filter)?;
@@ -977,7 +982,8 @@ pub(crate) fn run_one_shot_for_tui(
                     .map(sw_galaxy_map_core::utils::normalize_text)
                     .filter(|s| !s.is_empty())
                 {
-                    let hits = sw_galaxy_map_core::utils::fuzzy::fuzzy_search(&con, &qn, 3, 5)?;
+                    let hits =
+                        sw_galaxy_map_core::utils::fuzzy::fuzzy_search(&con, &qn, 3, 5, None)?;
                     if !hits.is_empty() {
                         out.log_lines.push(format!(
                             "Search result for \"{}\": no planets found",
@@ -1189,15 +1195,8 @@ pub(crate) fn run_one_shot_for_tui(
             } => {
                 validate::validate_limit(*limit as i64, "list")?;
                 let con = open_db_migrating(cli.db.clone())?;
-                let items = commands::route::resolve_list_for_tui(
-                    &con,
-                    *limit,
-                    status.as_deref(),
-                    *from,
-                    *to,
-                    *wp,
-                    *sort,
-                )?;
+                let items =
+                    resolve_list_for_tui(&con, *limit, status.as_deref(), *from, *to, *wp, *sort)?;
 
                 let mut out = tui_default_output();
 
@@ -1265,7 +1264,7 @@ pub(crate) fn run_one_shot_for_tui(
             args::RouteCmd::Show { route_id } => {
                 validate::validate_route_id(*route_id, "show")?;
                 let con = open_db_migrating(cli.db.clone())?;
-                let data = commands::route::resolve_show_for_tui(&con, *route_id)?;
+                let data = resolve_show_for_tui(&con, *route_id)?;
                 build_route_show_output(&con, &data.loaded)
             }
 

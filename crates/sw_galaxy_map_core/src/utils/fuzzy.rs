@@ -53,8 +53,12 @@ pub struct FuzzyHit {
     pub distance: usize,
 }
 
-/// Load all active planet names and aliases, compute Levenshtein distance
-/// against `query_norm`, and return the best matches within `max_distance`.
+/// Load planet names and aliases, compute Levenshtein distance against
+/// `query_norm`, and return the best matches within `max_distance`.
+///
+/// If `status` is provided, only planets with that exact status are considered
+/// (case-insensitive). Otherwise, the historical default applies and only
+/// active planets are searched.
 ///
 /// Results are sorted by distance (ascending), then name (ascending).
 pub fn fuzzy_search(
@@ -62,6 +66,7 @@ pub fn fuzzy_search(
     query_norm: &str,
     max_distance: usize,
     limit: usize,
+    status: Option<&str>,
 ) -> Result<Vec<FuzzyHit>> {
     if query_norm.is_empty() || limit == 0 {
         return Ok(Vec::new());
@@ -69,19 +74,38 @@ pub fn fuzzy_search(
 
     let mut hits: Vec<FuzzyHit> = Vec::new();
 
+    let status = status
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     // --- Match against planet_norm ---
     {
-        let mut stmt = con
-            .prepare(
+        let (sql, params): (&str, Vec<&dyn rusqlite::ToSql>) = if let Some(ref st) = status {
+            (
+                r#"
+                SELECT FID, Planet, planet_norm
+                FROM planets
+                WHERE status = ?1 COLLATE NOCASE
+                "#,
+                vec![st as &dyn rusqlite::ToSql],
+            )
+        } else {
+            (
                 r#"
                 SELECT FID, Planet, planet_norm
                 FROM planets
                 WHERE (status IS NULL OR status NOT IN ('deleted', 'skipped', 'invalid'))
                 "#,
+                vec![],
             )
+        };
+
+        let mut stmt = con
+            .prepare(sql)
             .context("Failed to prepare fuzzy planet_norm query")?;
 
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -105,18 +129,33 @@ pub fn fuzzy_search(
 
     // --- Match against alias_norm ---
     {
-        let mut stmt = con
-            .prepare(
+        let (sql, params): (&str, Vec<&dyn rusqlite::ToSql>) = if let Some(ref st) = status {
+            (
+                r#"
+                SELECT pa.planet_fid, p.Planet, pa.alias_norm
+                FROM planet_aliases pa
+                JOIN planets p ON p.FID = pa.planet_fid
+                WHERE p.status = ?1 COLLATE NOCASE
+                "#,
+                vec![st as &dyn rusqlite::ToSql],
+            )
+        } else {
+            (
                 r#"
                 SELECT pa.planet_fid, p.Planet, pa.alias_norm
                 FROM planet_aliases pa
                 JOIN planets p ON p.FID = pa.planet_fid
                 WHERE (p.status IS NULL OR p.status NOT IN ('deleted', 'skipped', 'invalid'))
                 "#,
+                vec![],
             )
+        };
+
+        let mut stmt = con
+            .prepare(sql)
             .context("Failed to prepare fuzzy alias_norm query")?;
 
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -128,12 +167,9 @@ pub fn fuzzy_search(
             let (fid, name, anorm) = row?;
             let dist = levenshtein(query_norm, &anorm);
             if dist <= max_distance {
-                // Avoid duplicates: only add if this FID isn't already in hits
-                // with a better or equal distance.
                 let dominated = hits.iter().any(|h| h.fid == fid && h.distance <= dist);
 
                 if !dominated {
-                    // Remove worse hit for same FID if present
                     hits.retain(|h| h.fid != fid || h.distance <= dist);
 
                     hits.push(FuzzyHit {
@@ -147,7 +183,6 @@ pub fn fuzzy_search(
         }
     }
 
-    // Sort by distance, then by name
     hits.sort_by(|a, b| a.distance.cmp(&b.distance).then(a.name.cmp(&b.name)));
     hits.truncate(limit);
 

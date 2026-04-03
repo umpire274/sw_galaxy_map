@@ -1,3 +1,5 @@
+use crate::cli::commands::route::resolve_show_for_tui;
+use crate::cli::commands::route::types::RouteListTuiItem;
 use crate::cli::typewriter::{TypewriterConfig, TypewriterMode, TypewriterState};
 use crate::cli::{NavigationPanelKind, build_navigation_panel};
 use clap::Parser;
@@ -108,7 +110,7 @@ struct App {
     history: Vec<String>,
     history_index: Option<usize>,
 
-    route_list_results: Vec<crate::cli::commands::route::RouteListTuiItem>,
+    route_list_results: Vec<RouteListTuiItem>,
 
     session_db: Option<String>,
     typewriter: TypewriterState,
@@ -828,7 +830,7 @@ fn handle_route_list_selection(app: &mut App, index: usize) {
         }
     };
 
-    let data = match crate::cli::commands::route::resolve_show_for_tui(&con, item.route_id) {
+    let data = match resolve_show_for_tui(&con, item.route_id) {
         Ok(data) => data,
         Err(e) => {
             push_log_line(

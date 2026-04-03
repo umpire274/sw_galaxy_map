@@ -4241,7 +4241,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sw_galaxy_map_cli"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "atty",
@@ -4259,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_core"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "atty",
@@ -4279,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_gui"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "arboard",

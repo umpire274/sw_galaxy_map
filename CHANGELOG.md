@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.15.1] - 2026-04-03
+
+### ♻️ Refactor (CLI)
+
+- Split the monolithic `route` command module into focused submodules:
+    - `compute.rs`
+    - `show.rs`
+    - `list.rs`
+    - `cleanup.rs`
+    - `explain.rs`
+    - `types.rs`
+- Reduced `route/mod.rs` to a lightweight dispatcher/orchestrator
+- Improved maintainability and separation of concerns without changing CLI behavior
+
+### 🐛 Fixed
+
+- Fixed fuzzy search ignoring structured filters (`--region`, `--sector`, `--grid`, `--status`, `--canon`, `--legends`).
+- Fixed fuzzy search always forcing "active-only" filtering, preventing queries like `--status deleted` from returning
+  results.
+- Fixed incorrect handling of fuzzy results in CLI (`search.rs`) where `FuzzyHit` and `PlanetSearchRow` pipelines were
+  mixed.
+- Fixed type mismatch and runtime inconsistencies by introducing a proper fuzzy → structured search pipeline (
+  `fuzzy_search_filtered`).
+- Fixed incorrect result ordering after SQL hydration by restoring original fuzzy ranking.
+- Fixed compilation errors caused by outdated `fuzzy_search` call sites (missing `status` argument).
+
+---
+
 ## [0.15.0] - 2026-04-03
 
 ### ✨ Added
