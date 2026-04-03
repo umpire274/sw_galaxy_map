@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.15.1] - 2026-04-03
 
+### ♻️ Refactor (CLI)
+
+- Split the monolithic `route` command module into focused submodules:
+    - `compute.rs`
+    - `show.rs`
+    - `list.rs`
+    - `cleanup.rs`
+    - `explain.rs`
+    - `types.rs`
+- Reduced `route/mod.rs` to a lightweight dispatcher/orchestrator
+- Improved maintainability and separation of concerns without changing CLI behavior
+
 ### 🐛 Fixed
 
 - Fixed fuzzy search ignoring structured filters (`--region`, `--sector`, `--grid`, `--status`, `--canon`, `--legends`).
