@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.15.0] - 2026-04-03
+
+### ✨ Added
+
+- **Fuzzy search** with Levenshtein distance matching
+    - New `--fuzzy` flag on the `search` command for explicit fuzzy mode
+    - Automatic "Did you mean?" suggestions when exact search returns 0 results
+    - Levenshtein distance implementation (zero dependencies, O(n*m))
+    - Matches against both `planet_norm` and `alias_norm` with deduplication
+    - Max distance threshold: 3 edits, configurable via constant
+    - Full integration in both CLI and TUI (fuzzy results are selectable in TUI)
+    - 7 unit tests covering identical, missing char, replaced char, two edits, completely different, empty strings, case
+      sensitivity
+- **Enriched `route explain`** output
+    - Structured ETA breakdown: route/direct length, overhead %, hyperdrive class, endpoint regions with compression
+      factors, blend policy, base CF, three detour multipliers (geometric, count, severity) with formulas, combined
+      multiplier, effective CF, final ETA
+    - Waypoint-by-waypoint table with segment distance, cumulative distance, and label (aligned columns)
+    - Detour summary: total overhead (parsec + %), average score, average severity, worst detour, exhausted tries count
+    - All three sections also rendered in TUI log panel
+- **CSV polyline export** for routes
+    - New `--csv <path>` flag on `route explain`
+    - Columns: `seq`, `x`, `y`, `segment_parsec`, `cumulative_parsec`, `label`
+    - CSV-safe label escaping (quotes, commas)
+    - Importable in QGIS, Google Earth, and GIS tools
+- **Galaxy statistics** command (`db stats`)
+    - Planets by status (active, inserted, modified, skipped, deleted, invalid, no status) with percentages
+    - Canon / Legends breakdown (active planets only) with Both and Neither counts
+    - Top N regions by planet count with percentage
+    - Top N sectors by planet count
+    - Grid coverage: distinct cells count and most populated grids
+    - Route statistics: total, ok/failed, total length, average detours per route
+    - `--top` flag to control number of entries per category (default: 10)
+    - Full TUI support (rendered in log panel)
+- New `GalaxyStats` struct in `sw_galaxy_map_core::model`
+- New `galaxy_stats()` query function with aggregate SQL queries
+- New `FuzzyHit` struct and `fuzzy` module in `sw_galaxy_map_core::utils`
+
+### 🔄 Changed
+
+- `SearchFilter` struct now includes `fuzzy: bool` field
+- `search` command has new `--fuzzy` flag
+- `RouteExplainArgs` now includes `--csv` flag
+- `route explain` text output reorganized: ETA breakdown section replaces compact one-line ETA, waypoint table with
+  distances replaces simple coordinate list, detour summary added before individual detour details
+- TUI `build_route_show_output` enriched with segment distances, ETA breakdown, and detour summary
+- TUI search dispatch now handles explicit `--fuzzy` mode with selectable results
+
+### ♻️ Refactor (core)
+
+- Split `db::queries` into domain modules (`planets`, `routes`, `waypoints`, `stats`, etc.)
+- Introduced `row_mappers.rs` for centralized row → model mapping
+- Removed monolithic `queries/mod.rs` logic
+- Cleaned unused constants and imports
+- Preserved public API (no breaking changes)
+
+---
+
 ## [0.14.0] - 2026-04-02
 
 ### ✨ Added

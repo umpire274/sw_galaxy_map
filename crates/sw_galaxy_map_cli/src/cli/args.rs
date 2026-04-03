@@ -57,6 +57,10 @@ pub enum Commands {
         #[arg(long, action = clap::ArgAction::SetTrue)]
         legends: bool,
 
+        /// Enable fuzzy matching (tolerates typos using Levenshtein distance)
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        fuzzy: bool,
+
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
@@ -175,6 +179,13 @@ pub enum DbCommands {
 
     /// Rebuild the `planet_search` table and FTS index from current `planets` data
     RebuildSearch,
+
+    /// Display aggregate galaxy statistics (planets by region/sector/grid/status, routes)
+    Stats {
+        /// Number of top entries to show per category (default: 10)
+        #[arg(long, default_value_t = 10)]
+        top: usize,
+    },
 
     /// Sync the official Lucasfilm star-systems catalog into the planets table
     ///
@@ -558,4 +569,10 @@ pub struct RouteExplainArgs {
     /// Example: `--sublight-kmps 2000` (civilian-ish baseline)
     #[arg(long = "sublight-kmps")]
     pub sublight_kmps: Option<f64>,
+
+    /// Export the route polyline as CSV to the given file path.
+    ///
+    /// Columns: seq, x, y, segment_parsec, cumulative_parsec, label
+    #[arg(long = "csv")]
+    pub csv: Option<std::path::PathBuf>,
 }

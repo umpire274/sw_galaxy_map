@@ -315,8 +315,47 @@ pub struct SearchFilter {
     pub canon: Option<bool>,
     /// If true, only Legends planets.
     pub legends: Option<bool>,
+    /// Enable fuzzy matching (Levenshtein distance tolerance for typos).
+    pub fuzzy: bool,
     /// Max results.
     pub limit: i64,
+}
+
+/// Aggregate galaxy statistics.
+#[derive(Debug, Clone, Default)]
+pub struct GalaxyStats {
+    pub total_planets: i64,
+
+    // By status
+    pub status_active: i64,
+    pub status_inserted: i64,
+    pub status_modified: i64,
+    pub status_skipped: i64,
+    pub status_deleted: i64,
+    pub status_invalid: i64,
+    pub status_null: i64,
+
+    // Canon / Legends
+    pub canon_count: i64,
+    pub legends_count: i64,
+    pub both_count: i64,
+    pub neither_count: i64,
+
+    // Top regions (name, count)
+    pub top_regions: Vec<(String, i64)>,
+    // Top sectors (name, count)
+    pub top_sectors: Vec<(String, i64)>,
+
+    // Grid coverage
+    pub distinct_grids: i64,
+    pub top_grids: Vec<(String, i64)>,
+
+    // Routes
+    pub total_routes: i64,
+    pub routes_ok: i64,
+    pub routes_failed: i64,
+    pub total_route_length: f64,
+    pub avg_detours_per_route: f64,
 }
 
 /// Represents an unknown planet hit near a known planet.

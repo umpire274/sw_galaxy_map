@@ -323,6 +323,13 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
                 Ok(())
             }
 
+            args::DbCommands::Stats { top } => {
+                let con = open_db_migrating(cli.db.clone())?;
+                let s = sw_galaxy_map_core::db::queries::galaxy_stats(&con, *top)?;
+                print_galaxy_stats(&s, *top);
+                Ok(())
+            }
+
             args::DbCommands::Sync {
                 csv,
                 table,
@@ -386,6 +393,7 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
             status,
             canon,
             legends,
+            fuzzy,
             limit,
         } => {
             let filter = sw_galaxy_map_core::model::SearchFilter {
@@ -396,6 +404,7 @@ fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> Result<()> {
                 status: status.clone(),
                 canon: if *canon { Some(true) } else { None },
                 legends: if *legends { Some(true) } else { None },
+                fuzzy: *fuzzy,
                 limit: *limit,
             };
             validate::validate_search(&filter)?;
@@ -596,11 +605,32 @@ pub(crate) fn build_route_show_output(
         .push(format!("Waypoints: {}", loaded.waypoints.len()));
     out.log_lines.push(String::new());
 
-    let last_seq = loaded.waypoints.len().saturating_sub(1);
+    // --- Waypoint-by-waypoint with segment/cumulative distances ---
+    out.log_lines.push(format!(
+        "  {:>3}  {:>10}  {:>10}  {:>10}  {:>10}  {}",
+        "Seq", "X", "Y", "Segment", "Cumul.", "Label"
+    ));
+    out.log_lines.push(format!(
+        "  {:->3}  {:->10}  {:->10}  {:->10}  {:->10}  {:->20}",
+        "", "", "", "", "", ""
+    ));
 
-    for w in &loaded.waypoints {
-        let is_start = w.seq as usize == 0;
-        let is_end = w.seq as usize == last_seq;
+    let last_seq = loaded.waypoints.len().saturating_sub(1);
+    let mut cumulative = 0.0_f64;
+
+    for (i, w) in loaded.waypoints.iter().enumerate() {
+        let segment_dist = if i == 0 {
+            0.0
+        } else {
+            let prev = &loaded.waypoints[i - 1];
+            use sw_galaxy_map_core::routing::geometry::{Point, dist as geom_dist};
+            geom_dist(Point::new(prev.x, prev.y), Point::new(w.x, w.y))
+        };
+
+        cumulative += segment_dist;
+
+        let is_start = i == 0;
+        let is_end = i == last_seq;
 
         let label = if is_start {
             "Start".to_string()
@@ -608,27 +638,150 @@ pub(crate) fn build_route_show_output(
             "End".to_string()
         } else {
             match (w.waypoint_name.as_deref(), w.waypoint_kind.as_deref()) {
-                (Some(name), Some(kind)) => {
-                    out.log_lines.push(format!("  {}. {}", w.seq, name));
-                    out.log_lines.push(format!("     kind: {}", kind));
-                    out.log_lines.push(format!("     ({:.3}, {:.3})", w.x, w.y));
-                    out.log_lines.push(String::new());
-                    continue;
-                }
+                (Some(name), Some(kind)) => format!("{} ({})", name, kind),
                 (Some(name), None) => name.to_string(),
-                (None, Some(kind)) => format!("Waypoint ({})", kind),
-                (None, None) => format!("Waypoint {}", w.seq),
+                _ => "waypoint".to_string(),
             }
         };
 
-        out.log_lines.push(format!("  {}. {}", w.seq, label));
-        out.log_lines.push(format!("     ({:.3}, {:.3})", w.x, w.y));
-        out.log_lines.push(String::new());
+        let seg_str = if i == 0 {
+            "-".to_string()
+        } else {
+            format!("{:.3}", segment_dist)
+        };
+
+        out.log_lines.push(format!(
+            "  {:>3}  {:>10.3}  {:>10.3}  {:>10}  {:>10.3}  {}",
+            w.seq, w.x, w.y, seg_str, cumulative, label
+        ));
     }
 
+    // --- ETA breakdown in log ---
+    if let Some(ref eta) = eta_estimate {
+        out.log_lines.push(String::new());
+        out.log_lines.push("ETA Breakdown:".to_string());
+        out.log_lines.push(format!(
+            "  Route length     : {:.3} parsec",
+            eta.route_length_parsec
+        ));
+        out.log_lines.push(format!(
+            "  Direct distance  : {:.3} parsec",
+            eta.direct_length_parsec
+        ));
+
+        let overhead_pct = if eta.direct_length_parsec > 0.0 {
+            ((eta.route_length_parsec / eta.direct_length_parsec) - 1.0) * 100.0
+        } else {
+            0.0
+        };
+        out.log_lines
+            .push(format!("  Route overhead   : +{:.1}%", overhead_pct));
+        out.log_lines
+            .push(format!("  Hyperdrive class : {:.1}", eta.hyperdrive_class));
+        out.log_lines.push(String::new());
+        out.log_lines.push("  Regions:".to_string());
+        out.log_lines.push(format!(
+            "    Origin         : {:?} (CF={:.1})",
+            eta.from_region,
+            eta.from_region.base_compression_factor()
+        ));
+        out.log_lines.push(format!(
+            "    Destination    : {:?} (CF={:.1})",
+            eta.to_region,
+            eta.to_region.base_compression_factor()
+        ));
+        out.log_lines.push(format!(
+            "    Base CF        : {:.2}",
+            eta.base_compression_factor
+        ));
+        out.log_lines.push(String::new());
+        out.log_lines.push("  Detour multipliers:".to_string());
+        out.log_lines.push(format!(
+            "    Geometric      : {:.4}",
+            eta.detour_multiplier_geom
+        ));
+        out.log_lines.push(format!(
+            "    Count          : {:.4} ({} detours)",
+            eta.detour_multiplier_count, eta.detour_count
+        ));
+        out.log_lines.push(format!(
+            "    Severity       : {:.4} (sum={:.3})",
+            eta.detour_multiplier_severity, eta.severity_sum
+        ));
+        out.log_lines.push(format!(
+            "    Combined       : {:.4}",
+            eta.detour_multiplier_total
+        ));
+        out.log_lines.push(String::new());
+        out.log_lines.push(format!(
+            "  Effective CF     : {:.2}",
+            eta.effective_compression_factor
+        ));
+        out.log_lines
+            .push(format!("  ETA              : {}", eta.format_human()));
+    }
+
+    // --- Detour summary ---
     out.log_lines.push(String::new());
     out.log_lines
         .push(format!("Detours: {}", loaded.detours.len()));
+
+    if !loaded.detours.is_empty() {
+        // Aggregate stats
+        let route_len = eta_estimate
+            .as_ref()
+            .map(|e| e.route_length_parsec)
+            .unwrap_or(0.0);
+        let direct_len = eta_estimate
+            .as_ref()
+            .map(|e| e.direct_length_parsec)
+            .unwrap_or(0.0);
+        let overhead_parsec = route_len - direct_len;
+        let overhead_pct = if direct_len > 0.0 {
+            (overhead_parsec / direct_len) * 100.0
+        } else {
+            0.0
+        };
+
+        let avg_score: f64 =
+            loaded.detours.iter().map(|d| d.score_total).sum::<f64>() / loaded.detours.len() as f64;
+
+        let worst = loaded.detours.iter().max_by(|a, b| {
+            a.score_total
+                .partial_cmp(&b.score_total)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let exhausted = loaded
+            .detours
+            .iter()
+            .filter(|d| d.tries_exhausted == 1)
+            .count();
+
+        out.log_lines.push(String::new());
+        out.log_lines.push("Detour Summary:".to_string());
+        out.log_lines.push(format!(
+            "  Route overhead   : +{:.3} pc (+{:.1}%)",
+            overhead_parsec, overhead_pct
+        ));
+        out.log_lines
+            .push(format!("  Avg score        : {:.3}", avg_score));
+
+        if let Some(w) = worst {
+            out.log_lines.push(format!(
+                "  Worst detour     : det#{} {} score={:.3}",
+                w.idx, w.obstacle_name, w.score_total
+            ));
+        }
+
+        out.log_lines.push(format!(
+            "  Exhausted tries  : {}/{}",
+            exhausted,
+            loaded.detours.len()
+        ));
+
+        out.log_lines.push(String::new());
+    }
 
     if !loaded.detours.is_empty() {
         out.log_lines.push(String::new());
@@ -721,6 +874,7 @@ pub(crate) fn run_one_shot_for_tui(
             status,
             canon,
             legends,
+            fuzzy,
             limit,
         } => {
             let filter = sw_galaxy_map_core::model::SearchFilter {
@@ -731,18 +885,114 @@ pub(crate) fn run_one_shot_for_tui(
                 status: status.clone(),
                 canon: if *canon { Some(true) } else { None },
                 legends: if *legends { Some(true) } else { None },
+                fuzzy: *fuzzy,
                 limit: *limit,
             };
             validate::validate_search(&filter)?;
             let con = open_db_migrating(cli.db.clone())?;
 
-            let rows = sw_galaxy_map_core::db::queries::search_planets_filtered(&con, &filter)?;
-
+            let mut out = tui_default_output();
             let query_label = query.as_deref().unwrap_or("(filter)");
 
-            let mut out = tui_default_output();
+            // --- Explicit fuzzy mode: resolve and show as selectable results ---
+            if filter.fuzzy {
+                if let Some(qn) = query
+                    .as_deref()
+                    .map(sw_galaxy_map_core::utils::normalize_text)
+                    .filter(|s| !s.is_empty())
+                {
+                    let hits = sw_galaxy_map_core::utils::fuzzy::fuzzy_search(
+                        &con,
+                        &qn,
+                        3,
+                        filter.limit as usize,
+                    )?;
+
+                    if hits.is_empty() {
+                        out.log_lines.push(format!(
+                            "Fuzzy search for \"{}\": no matches found (max distance: 3)",
+                            query_label
+                        ));
+                        return Ok(out);
+                    }
+
+                    let resolved =
+                        sw_galaxy_map_core::utils::fuzzy::resolve_fuzzy_hits(&con, &hits)?;
+
+                    if resolved.len() == 1 {
+                        let (planet, dist) = &resolved[0];
+                        let (title, lines) = build_planet_panel(planet, None);
+
+                        out.log_lines.push(format!(
+                            "Fuzzy search for \"{}\": 1 match (distance: {})",
+                            query_label, dist
+                        ));
+                        out.log_lines
+                            .push(format!("Displaying result: {}", planet.name));
+
+                        out.planet1_title = title;
+                        out.planet1_lines = lines;
+
+                        return Ok(out);
+                    }
+
+                    out.log_lines.push(format!(
+                        "Fuzzy search for \"{}\": {} matches found",
+                        query_label,
+                        resolved.len()
+                    ));
+                    out.log_lines.push(String::new());
+
+                    let mut search_rows = Vec::new();
+                    for (idx, (planet, dist)) in resolved.iter().enumerate() {
+                        out.log_lines.push(format!(
+                            "  {}. {} (distance: {})",
+                            idx + 1,
+                            planet.name,
+                            dist
+                        ));
+                        search_rows.push(planet.clone());
+                    }
+
+                    out.log_lines.push(String::new());
+                    out.log_lines
+                        .push("Type a number or `option N` to inspect a result.".to_string());
+
+                    out.search_results = search_rows;
+
+                    return Ok(out);
+                } else {
+                    out.log_lines
+                        .push("--fuzzy requires a text query".to_string());
+                    return Ok(out);
+                }
+            }
+
+            let rows = sw_galaxy_map_core::db::queries::search_planets_filtered(&con, &filter)?;
 
             if rows.is_empty() {
+                // --- Fuzzy fallback: suggest alternatives when exact search finds nothing ---
+                if let Some(qn) = query
+                    .as_deref()
+                    .map(sw_galaxy_map_core::utils::normalize_text)
+                    .filter(|s| !s.is_empty())
+                {
+                    let hits = sw_galaxy_map_core::utils::fuzzy::fuzzy_search(&con, &qn, 3, 5)?;
+                    if !hits.is_empty() {
+                        out.log_lines.push(format!(
+                            "Search result for \"{}\": no planets found",
+                            query_label
+                        ));
+                        out.log_lines.push(String::new());
+                        out.log_lines.push("Did you mean?".to_string());
+                        for hit in &hits {
+                            out.log_lines
+                                .push(format!("  - {} (distance: {})", hit.name, hit.distance));
+                        }
+                        return Ok(out);
+                    }
+                }
+
                 out.log_lines.push(format!(
                     "Search result for \"{}\": no planets found",
                     query_label
@@ -1028,6 +1278,23 @@ pub(crate) fn run_one_shot_for_tui(
             }
         },
 
+        args::Commands::Db { cmd } => match cmd {
+            args::DbCommands::Stats { top } => {
+                let con = open_db_migrating(cli.db.clone())?;
+                let s = sw_galaxy_map_core::db::queries::galaxy_stats(&con, *top)?;
+                let mut out = tui_default_output();
+                build_galaxy_stats_tui(&s, *top, &mut out);
+                Ok(out)
+            }
+            _ => {
+                let mut out = tui_default_output();
+                out.log_lines.push(
+                    "This db subcommand is not available in TUI. Use the CLI directly.".to_string(),
+                );
+                Ok(out)
+            }
+        },
+
         _ => {
             let mut out = tui_default_output();
             out.log_lines
@@ -1100,6 +1367,298 @@ fn region_name(r: sw_galaxy_map_core::routing::hyperspace::GalacticRegion) -> &'
         sw_galaxy_map_core::routing::hyperspace::GalacticRegion::WildSpace => "Wild Space",
         sw_galaxy_map_core::routing::hyperspace::GalacticRegion::UnknownRegions => {
             "Unknown Regions"
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Galaxy statistics rendering (v0.15.0)
+// ---------------------------------------------------------------------------
+
+fn pct(n: i64, total: i64) -> String {
+    if total > 0 {
+        format!("{:5.1}%", n as f64 / total as f64 * 100.0)
+    } else {
+        "    -".to_string()
+    }
+}
+
+fn print_galaxy_stats(s: &sw_galaxy_map_core::model::GalaxyStats, top: usize) {
+    println!("Galaxy Statistics");
+    println!("=================");
+    println!();
+    println!("Planets: {} total", s.total_planets);
+    println!();
+    println!("  By status:");
+    println!(
+        "    active     : {:>6}  ({})",
+        s.status_active,
+        pct(s.status_active, s.total_planets)
+    );
+    println!(
+        "    inserted   : {:>6}  ({})",
+        s.status_inserted,
+        pct(s.status_inserted, s.total_planets)
+    );
+    println!(
+        "    modified   : {:>6}  ({})",
+        s.status_modified,
+        pct(s.status_modified, s.total_planets)
+    );
+    println!(
+        "    skipped    : {:>6}  ({})",
+        s.status_skipped,
+        pct(s.status_skipped, s.total_planets)
+    );
+    println!(
+        "    deleted    : {:>6}  ({})",
+        s.status_deleted,
+        pct(s.status_deleted, s.total_planets)
+    );
+    println!(
+        "    invalid    : {:>6}  ({})",
+        s.status_invalid,
+        pct(s.status_invalid, s.total_planets)
+    );
+    if s.status_null > 0 {
+        println!(
+            "    (no status): {:>6}  ({})",
+            s.status_null,
+            pct(s.status_null, s.total_planets)
+        );
+    }
+
+    let active_total = s.total_planets - s.status_deleted - s.status_skipped - s.status_invalid;
+
+    println!();
+    println!("  Canon / Legends (active planets only):");
+    println!(
+        "    Canon      : {:>6}  ({})",
+        s.canon_count,
+        pct(s.canon_count, active_total)
+    );
+    println!(
+        "    Legends    : {:>6}  ({})",
+        s.legends_count,
+        pct(s.legends_count, active_total)
+    );
+    println!(
+        "    Both       : {:>6}  ({})",
+        s.both_count,
+        pct(s.both_count, active_total)
+    );
+    println!(
+        "    Neither    : {:>6}  ({})",
+        s.neither_count,
+        pct(s.neither_count, active_total)
+    );
+
+    if !s.top_regions.is_empty() {
+        println!();
+        println!("  Top {} regions:", top);
+        let name_w = s
+            .top_regions
+            .iter()
+            .map(|(n, _)| n.len())
+            .max()
+            .unwrap_or(10)
+            .max(10);
+        for (i, (name, cnt)) in s.top_regions.iter().enumerate() {
+            println!(
+                "    {:>2}. {:<name_w$} : {:>5}  ({})",
+                i + 1,
+                name,
+                cnt,
+                pct(*cnt, active_total)
+            );
+        }
+    }
+
+    if !s.top_sectors.is_empty() {
+        println!();
+        println!("  Top {} sectors:", top);
+        let name_w = s
+            .top_sectors
+            .iter()
+            .map(|(n, _)| n.len())
+            .max()
+            .unwrap_or(10)
+            .max(10);
+        for (i, (name, cnt)) in s.top_sectors.iter().enumerate() {
+            println!("    {:>2}. {:<name_w$} : {:>5}", i + 1, name, cnt);
+        }
+    }
+
+    println!();
+    println!("  Grid coverage: {} distinct cells", s.distinct_grids);
+    if !s.top_grids.is_empty() {
+        let top_str: Vec<String> = s
+            .top_grids
+            .iter()
+            .take(5)
+            .map(|(g, c)| format!("{} ({})", g, c))
+            .collect();
+        println!("    Most populated: {}", top_str.join(", "));
+    }
+
+    if s.total_routes > 0 {
+        println!();
+        println!("Routes: {}", s.total_routes);
+        println!("  ok       : {}", s.routes_ok);
+        println!("  failed   : {}", s.routes_failed);
+        if s.total_route_length > 0.0 {
+            println!("  Total length : {:.1} parsec", s.total_route_length);
+        }
+        if s.avg_detours_per_route > 0.0 {
+            println!("  Avg detours  : {:.1} per route", s.avg_detours_per_route);
+        }
+    }
+}
+
+fn build_galaxy_stats_tui(
+    s: &sw_galaxy_map_core::model::GalaxyStats,
+    top: usize,
+    out: &mut TuiCommandOutput,
+) {
+    let l = &mut out.log_lines;
+
+    l.push("Galaxy Statistics".to_string());
+    l.push("=================".to_string());
+    l.push(String::new());
+    l.push(format!("Planets: {} total", s.total_planets));
+    l.push(String::new());
+
+    l.push("  By status:".to_string());
+    l.push(format!(
+        "    active     : {:>6}  ({})",
+        s.status_active,
+        pct(s.status_active, s.total_planets)
+    ));
+    l.push(format!(
+        "    inserted   : {:>6}  ({})",
+        s.status_inserted,
+        pct(s.status_inserted, s.total_planets)
+    ));
+    l.push(format!(
+        "    modified   : {:>6}  ({})",
+        s.status_modified,
+        pct(s.status_modified, s.total_planets)
+    ));
+    l.push(format!(
+        "    skipped    : {:>6}  ({})",
+        s.status_skipped,
+        pct(s.status_skipped, s.total_planets)
+    ));
+    l.push(format!(
+        "    deleted    : {:>6}  ({})",
+        s.status_deleted,
+        pct(s.status_deleted, s.total_planets)
+    ));
+    l.push(format!(
+        "    invalid    : {:>6}  ({})",
+        s.status_invalid,
+        pct(s.status_invalid, s.total_planets)
+    ));
+    if s.status_null > 0 {
+        l.push(format!(
+            "    (no status): {:>6}  ({})",
+            s.status_null,
+            pct(s.status_null, s.total_planets)
+        ));
+    }
+
+    let active_total = s.total_planets - s.status_deleted - s.status_skipped - s.status_invalid;
+
+    l.push(String::new());
+    l.push("  Canon / Legends (active planets only):".to_string());
+    l.push(format!(
+        "    Canon      : {:>6}  ({})",
+        s.canon_count,
+        pct(s.canon_count, active_total)
+    ));
+    l.push(format!(
+        "    Legends    : {:>6}  ({})",
+        s.legends_count,
+        pct(s.legends_count, active_total)
+    ));
+    l.push(format!(
+        "    Both       : {:>6}  ({})",
+        s.both_count,
+        pct(s.both_count, active_total)
+    ));
+    l.push(format!(
+        "    Neither    : {:>6}  ({})",
+        s.neither_count,
+        pct(s.neither_count, active_total)
+    ));
+
+    if !s.top_regions.is_empty() {
+        l.push(String::new());
+        l.push(format!("  Top {} regions:", top));
+        let name_w = s
+            .top_regions
+            .iter()
+            .map(|(n, _)| n.len())
+            .max()
+            .unwrap_or(10)
+            .max(10);
+        for (i, (name, cnt)) in s.top_regions.iter().enumerate() {
+            l.push(format!(
+                "    {:>2}. {:<name_w$} : {:>5}  ({})",
+                i + 1,
+                name,
+                cnt,
+                pct(*cnt, active_total)
+            ));
+        }
+    }
+
+    if !s.top_sectors.is_empty() {
+        l.push(String::new());
+        l.push(format!("  Top {} sectors:", top));
+        let name_w = s
+            .top_sectors
+            .iter()
+            .map(|(n, _)| n.len())
+            .max()
+            .unwrap_or(10)
+            .max(10);
+        for (i, (name, cnt)) in s.top_sectors.iter().enumerate() {
+            l.push(format!("    {:>2}. {:<name_w$} : {:>5}", i + 1, name, cnt));
+        }
+    }
+
+    l.push(String::new());
+    l.push(format!(
+        "  Grid coverage: {} distinct cells",
+        s.distinct_grids
+    ));
+    if !s.top_grids.is_empty() {
+        let top_str: Vec<String> = s
+            .top_grids
+            .iter()
+            .take(5)
+            .map(|(g, c)| format!("{} ({})", g, c))
+            .collect();
+        l.push(format!("    Most populated: {}", top_str.join(", ")));
+    }
+
+    if s.total_routes > 0 {
+        l.push(String::new());
+        l.push(format!("Routes: {}", s.total_routes));
+        l.push(format!("  ok       : {}", s.routes_ok));
+        l.push(format!("  failed   : {}", s.routes_failed));
+        if s.total_route_length > 0.0 {
+            l.push(format!(
+                "  Total length : {:.1} parsec",
+                s.total_route_length
+            ));
+        }
+        if s.avg_detours_per_route > 0.0 {
+            l.push(format!(
+                "  Avg detours  : {:.1} per route",
+                s.avg_detours_per_route
+            ));
         }
     }
 }
