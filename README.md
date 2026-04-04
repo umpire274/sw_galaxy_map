@@ -6,31 +6,53 @@
 [![License](https://img.shields.io/crates/l/sw_galaxy_map_cli.svg)](https://github.com/umpire274/sw_galaxy_map)
 [![Rust](https://github.com/umpire274/sw_galaxy_map/actions/workflows/rust.yml/badge.svg)](https://github.com/umpire274/sw_galaxy_map/actions)
 
-**sw_galaxy_map** is a Rust workspace for exploring the Star Wars galaxy using a local SQLite database, with both CLI
-and GUI frontends.
+---
 
-The application provides tools to:
+## 🌌 Overview
 
-* search for planets by name or alias,
-* display detailed information about a planet,
-* find nearby planets using Euclidean distance on X/Y coordinates (parsecs),
-* inspect and manage **unknown (unclassified) planets**,
-* compute hyperspace routes avoiding planetary obstacles.
+**sw_galaxy_map** is a Rust workspace for exploring the Star Wars galaxy using a local SQLite database, with:
 
-The project is designed to work **offline** once the database is available and is intended for educational and
-non-commercial use.
+* 🖥️ **CLI interface**
+* 🧭 **Interactive TUI (ratatui)**
+* 🪟 **GUI (egui/eframe)**
+
+The application works **fully offline** once the database is initialized.
 
 ---
 
-## Workspace layout (0.9.x)
+## ✨ Features
+
+* 🔎 Planet search (exact + fuzzy)
+* 🎯 Advanced filtering (region, sector, grid, status, canon/legends)
+* 📍 Nearby planet search (Euclidean distance in parsecs)
+* 🧪 Unknown planets workflow (staging + review)
+* 🧭 Hyperspace routing engine with obstacle avoidance
+* 📊 Galaxy statistics and analytics
+* 🖥️ Interactive TUI with panels and navigation
+* 📦 CSV export and JSON output support
+
+---
+
+## 🧱 Workspace layout (0.15.x)
 
 The project is organized as a Cargo workspace:
 
-* `sw_galaxy_map_core` — domain logic, routing engine, SQLite access
-* `sw_galaxy_map_cli` — command-line interface
-* `sw_galaxy_map_gui` — egui/eframe graphical interface
+* `sw_galaxy_map_core` — domain logic, routing engine, database
+* `sw_galaxy_map_cli` — CLI + TUI interface
+* `sw_galaxy_map_gui` — graphical interface (egui)
+* `sw_galaxy_map_sync` — CSV synchronization engine
+
+---
+
+## 🚀 Getting started
 
 ### Run CLI
+
+```bash
+cargo run -p sw_galaxy_map_cli -- <command>
+```
+
+### Run interactive TUI
 
 ```bash
 cargo run -p sw_galaxy_map_cli
@@ -44,187 +66,229 @@ cargo run -p sw_galaxy_map_gui
 
 ---
 
-# 🔎 Planet search
+## 🔎 Planet search
 
-Search planets by name or alias:
+### Basic search
 
 ```bash
 sw_galaxy_map search tatooine
 ```
 
-Output includes **coordinates (X/Y)**:
+### Fuzzy search (typo-tolerant)
 
-```text
-FID      Planet            Region        Sector         System         Grid     X        Y
---------------------------------------------------------------------------------------------
-1234     Tatooine          Outer Rim     Arkanis        Tatoo          R-16     1040.12  -333.45
+```bash
+sw_galaxy_map search tatoine --fuzzy
+```
+
+### Advanced filters
+
+```bash
+sw_galaxy_map search tatooine \
+  --region "outer rim" \
+  --sector "arkanis" \
+  --grid "R-16" \
+  --status active \
+  --canon
+```
+
+### Output example
+
+```
+FID      Planet        Region        Sector        System        Grid     Status   X        Y
+----------------------------------------------------------------------------------------------
+1234     Tatooine      Outer Rim     Arkanis       Tatoo         R-16     active   1040.12  -333.45
 ```
 
 ---
 
-# 🧪 Unknown planets workflow
+## 🧭 Routing engine
 
-## Overview
+### Compute route
 
-Starting from **v0.9.6**, `planets_unknown` is no longer a simple dump of skipped rows, but a **staging table** aligned
-with `planets`.
+```bash
+sw_galaxy_map route compute tatooine dathomir
+```
 
-It is used to:
+### Show route
 
-* inspect incomplete or malformed data
-* manually review and classify entries
-* support future editing/promoting workflows
+```bash
+sw_galaxy_map route show <id>
+```
 
-## Table features
+### Explain route (advanced)
 
-* internal `id` (stable primary key)
-* nullable `fid`, `x`, `y`
-* normalized name (`planet_norm`)
-* structural fields (region, sector, system, etc.)
-* workflow flags:
+```bash
+sw_galaxy_map route explain <id>
+```
 
-    * `reviewed`
-    * `promoted`
-* `reason` describing why the row was skipped
-* `notes` for manual annotations
+Includes:
+
+* ETA breakdown
+* waypoint distances
+* detour analysis
+* routing diagnostics
+
+### CSV export
+
+```bash
+sw_galaxy_map route explain <id> --csv route.csv
+```
 
 ---
 
-## Commands
+## 📊 Galaxy statistics
+
+```bash
+sw_galaxy_map db stats --top 10
+```
+
+Includes:
+
+* planets by status
+* canon / legends distribution
+* top regions and sectors
+* grid coverage
+* routing statistics
+
+---
+
+## 🧪 Unknown planets workflow
 
 ### List unknown planets
 
 ```bash
 sw_galaxy_map unknown list
 sw_galaxy_map unknown list --page 2
-sw_galaxy_map unknown list --page 2 --page-size 50
 ```
 
-Features:
-
-* pagination
-* stable internal IDs
-* safe handling of NULL values
-
----
-
-### Search nearby known planets from an unknown
+### Search nearby known planets
 
 ```bash
 sw_galaxy_map unknown search <id> --near 1500
 ```
 
-Uses unknown coordinates → finds nearby known planets.
-
-Fails gracefully if coordinates are missing.
-
----
-
-### NEW (v0.9.10): Find unknown near a known planet
+### Find unknown near a known planet
 
 ```bash
 sw_galaxy_map unknown near tatooine --range 1500
 ```
 
-Finds unknown planets within a radius from a known planet.
-
-Features:
-
-* uses `planets.X` / `planets.Y`
-* excludes unknown entries without coordinates
-* sorted by distance
-* shows reason and workflow status
-
-Example:
-
-```text
-Unknown planets near Tatooine (X=1040.12, Y=-333.45) within 1500 parsecs
-
-#  12 | fid=9981   | Unknown System Alpha | x=  999.23 | y= -210.88 | dist=145.77 | reason=missing_region
-#  43 | fid=-      | (unknown)            | x= 1102.01 | y= -412.09 | dist= 98.43 | reason=missing_fid
-```
-
 ---
 
-# 🗄️ Database lifecycle
+## 🗄️ Database lifecycle
 
-## Initialization
+### Initialize database
 
 ```bash
 sw_galaxy_map db init
 ```
 
-Now correctly:
-
-* creates full schema (including routes & waypoints)
-* populates both:
-
-    * `planets`
-    * `planets_unknown`
-
-## Update
+### Update database
 
 ```bash
 sw_galaxy_map db update
 ```
 
-Features:
-
-* incremental sync (no full rebuild)
-* preserves `planets_unknown.id`
-* stable CLI references
-
----
-
-# 🧭 Routing engine
-
-The routing engine computes hyperspace paths avoiding planetary obstacles.
-
-## Key concepts
-
-* planets = circular obstacles
-* routes = polylines
-* detours = dynamically generated waypoints
-
----
-
-## Route command
+### Rebuild search indexes
 
 ```bash
-sw_galaxy_map route compute tatooine dathomir
+sw_galaxy_map db rebuild-search
 ```
 
 ---
 
-# 🧷 Waypoints & fingerprinting
+## 🔄 Sync (CSV import)
 
-Computed waypoints are deduplicated using a **fingerprint**:
+```bash
+sw_galaxy_map db sync --csv data.csv
+```
 
-* ensures reuse across routes
-* prevents duplicate inserts
-* enables caching
+Features:
+
+* incremental updates
+* status tracking (`active`, `inserted`, `modified`, etc.)
+* XLSX report generation
+* dry-run support
 
 ---
 
-# 🗃️ Persistence model
+## 🖥️ TUI (Interactive Mode)
+
+The TUI provides a full interactive experience:
+
+* 📜 Log panel (left)
+* 🌍 Planet panels (right)
+* 🧭 Navigation panel (route / near data)
+* ⌨️ Command input with history
+
+### Key bindings
+
+* `Tab` / `Shift+Tab` → switch focus
+* `↑ ↓` → scroll
+* `Enter` → execute command
+* `Esc` → exit
+
+---
+
+## 🧠 Routing model
+
+The routing engine uses:
+
+* Euclidean geometry (parsecs)
+* planetary obstacles (circles)
+* dynamic waypoint generation
+* detour scoring system:
+
+  * geometric penalty
+  * turn penalty
+  * proximity penalty
+
+### ETA estimation
+
+* region-based compression factors
+* hyperdrive class scaling
+* detour multipliers
+
+---
+
+## 🗃️ Persistence model
 
 Main tables:
 
 * `planets`
 * `planets_unknown`
-* `waypoints`
+* `planet_aliases`
+* `planet_search`
 * `routes`
 * `route_waypoints`
 * `route_detours`
 
 ---
 
-## Acknowledgements
+## 📦 Installation
 
-The planetary data used by this project were obtained from the **Star Wars Galaxy Map**:
+From crates.io:
 
-[http://www.swgalaxymap.com/](http://www.swgalaxymap.com/)
+```bash
+cargo install sw_galaxy_map_cli
+```
 
-Created and maintained by **Henry Bernberg**.
+---
+
+## ⚠️ Notes
+
+* This project is intended for **educational and non-commercial use**
+* Works fully offline after database initialization
+* Requires SQLite (bundled via rusqlite)
+
+---
+
+## 🙏 Acknowledgements
+
+Planetary data derived from:
+
+* [http://www.swgalaxymap.com/](http://www.swgalaxymap.com/)
+  by **Henry Bernberg**
+* [https://www.starwars.com/star-wars-galaxy-map](https://www.starwars.com/star-wars-galaxy-map)
 
 This project is for **educational and non-commercial use only** and is not affiliated with Lucasfilm or Disney.
