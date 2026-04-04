@@ -449,14 +449,11 @@ pub(crate) fn run_one_shot_for_tui(
 }
 
 #[allow(dead_code)]
-pub(crate) fn route_eta_text(con: &rusqlite::Connection, loaded: &RouteLoaded) -> Option<String> {
+pub fn route_eta_text(con: &rusqlite::Connection, loaded: &RouteLoaded) -> Option<String> {
     route_eta(con, loaded).map(|e| e.format_human())
 }
 
-pub(crate) fn route_eta(
-    con: &rusqlite::Connection,
-    loaded: &RouteLoaded,
-) -> Option<RouteEtaEstimate> {
+pub fn route_eta(con: &rusqlite::Connection, loaded: &RouteLoaded) -> Option<RouteEtaEstimate> {
     estimate_route_eta(
         con,
         loaded,
