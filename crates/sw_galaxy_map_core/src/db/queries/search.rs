@@ -2,9 +2,7 @@ use crate::db::has_table;
 use crate::model::{PlanetSearchRow, SearchFilter};
 use crate::utils::fuzzy::fuzzy_search;
 use anyhow::{Context, Result};
-use rusqlite::types::Value;
-use rusqlite::{Connection, params_from_iter};
-use std::collections::HashMap;
+use rusqlite::{Connection, OptionalExtension, params};
 
 /// Searches planets by normalized free-text query.
 ///
@@ -275,163 +273,172 @@ pub fn search_planets_filtered(
     Ok(items)
 }
 
-/// Performs fuzzy search while preserving all active structured filters.
+/// Executes fuzzy search and then applies structured filters without
+/// truncating the fuzzy candidate pool too early.
 ///
-/// Strategy:
-/// 1. get fuzzy candidate FIDs in ranked order
+/// Pipeline:
+/// 1. collect fuzzy candidates
 /// 2. hydrate them as `PlanetSearchRow`
-/// 3. apply structured filters in SQL
+/// 3. apply structured filters
 /// 4. restore original fuzzy order
 /// 5. truncate to `filter.limit`
+///
+/// This function uses adaptive over-fetching to avoid losing valid matches
+/// when structured filters (region/sector/grid/status/canon/legends) are
+/// restrictive compared to the fuzzy candidate pool.
 pub fn fuzzy_search_filtered(
     con: &Connection,
     query_norm: &str,
     max_distance: usize,
     filter: &SearchFilter,
 ) -> Result<Vec<PlanetSearchRow>> {
+    use std::collections::{HashMap, HashSet};
+
     if query_norm.trim().is_empty() || filter.limit <= 0 {
         return Ok(Vec::new());
     }
 
-    // Pull more than the final limit so post-filtering still has enough candidates.
-    let candidate_limit = (filter.limit.max(1) as usize).saturating_mul(10);
+    let target_limit = filter.limit as usize;
 
-    let fuzzy_hits = fuzzy_search(
-        con,
-        query_norm,
-        max_distance,
-        candidate_limit,
-        filter.status.as_deref(),
-    )?;
+    let status_filter = filter.status.as_deref().map(|s| s.to_ascii_lowercase());
+    let region_filter = filter.region.as_deref().map(|s| s.to_ascii_lowercase());
+    let sector_filter = filter.sector.as_deref().map(|s| s.to_ascii_lowercase());
+    let grid_filter = filter.grid.as_deref().map(|s| s.to_ascii_lowercase());
 
-    if fuzzy_hits.is_empty() {
-        return Ok(Vec::new());
-    }
+    // Start with a reasonably wide batch and grow until we either:
+    // - have enough filtered results
+    // - exhaust fuzzy candidates
+    let mut fetch_limit = target_limit.saturating_mul(10).max(50);
 
-    let ordered_fids: Vec<i64> = fuzzy_hits.iter().map(|h| h.fid).collect();
+    loop {
+        let candidates = fuzzy_search(
+            con,
+            query_norm,
+            max_distance,
+            fetch_limit,
+            filter.status.as_deref(),
+        )
+        .context("Failed to execute fuzzy search")?;
 
-    let mut sql = String::from(
-        r#"
-        SELECT
-            p.FID,
-            p.Planet,
-            p.Region,
-            p.Sector,
-            p.System,
-            p.Grid,
-            p.X,
-            p.Y,
-            COALESCE(p.Canon, 0),
-            COALESCE(p.Legends, 0),
-            p.status
-        FROM planets p
-        WHERE p.FID IN (
-        "#,
-    );
-
-    let mut params: Vec<Value> = Vec::new();
-
-    for (idx, fid) in ordered_fids.iter().enumerate() {
-        if idx > 0 {
-            sql.push_str(", ");
+        if candidates.is_empty() {
+            return Ok(Vec::new());
         }
-        sql.push('?');
-        params.push(Value::Integer(*fid));
-    }
 
-    sql.push_str(")\n");
+        // Preserve fuzzy order so we can restore it after SQL hydration/filtering.
+        let mut order_by_fid: HashMap<i64, usize> = HashMap::with_capacity(candidates.len());
+        for (idx, hit) in candidates.iter().enumerate() {
+            order_by_fid.entry(hit.fid).or_insert(idx);
+        }
 
-    // Status filter
-    //
-    // Important:
-    // - if user explicitly requested a status, honor that exact status
-    // - otherwise preserve the historical "active only" behavior
-    if let Some(st) = filter
-        .status
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        sql.push_str(" AND p.status = ? COLLATE NOCASE\n");
-        params.push(Value::Text(st.to_string()));
-    } else {
-        sql.push_str(
-            " AND (p.status IS NULL OR p.status NOT IN ('deleted', 'skipped', 'invalid'))\n",
-        );
-    }
+        let fids: Vec<i64> = candidates.iter().map(|h| h.fid).collect();
+        let fid_set: HashSet<i64> = fids.iter().copied().collect();
 
-    if let Some(region) = filter
-        .region
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        sql.push_str(" AND p.Region LIKE ? COLLATE NOCASE\n");
-        params.push(Value::Text(format!("%{}%", region)));
-    }
+        // Hydrate candidates as PlanetSearchRow.
+        let mut stmt = con
+            .prepare(
+                r#"
+                SELECT
+                    FID,
+                    Planet,
+                    Region,
+                    Sector,
+                    System,
+                    Grid,
+                    X,
+                    Y,
+                    Canon,
+                    Legends,
+                    status
+                FROM planets
+                WHERE FID = ?1
+                "#,
+            )
+            .context("Failed to prepare fuzzy candidate hydration query")?;
 
-    if let Some(sector) = filter
-        .sector
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        sql.push_str(" AND p.Sector LIKE ? COLLATE NOCASE\n");
-        params.push(Value::Text(format!("%{}%", sector)));
-    }
+        let mut hydrated: Vec<PlanetSearchRow> = Vec::with_capacity(fids.len());
 
-    if let Some(grid) = filter
-        .grid
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        sql.push_str(" AND p.Grid = ? COLLATE NOCASE\n");
-        params.push(Value::Text(grid.to_string()));
-    }
+        for fid in &fids {
+            let row = stmt
+                .query_row(params![fid], |r| {
+                    Ok(PlanetSearchRow {
+                        fid: r.get(0)?,
+                        name: r.get(1)?,
+                        region: r.get(2)?,
+                        sector: r.get(3)?,
+                        system: r.get(4)?,
+                        grid: r.get(5)?,
+                        x: r.get(6)?,
+                        y: r.get(7)?,
+                        canon: r.get::<_, Option<i64>>(8)?.unwrap_or(0) == 1,
+                        legends: r.get::<_, Option<i64>>(9)?.unwrap_or(0) == 1,
+                        status: r.get(10)?,
+                    })
+                })
+                .optional()
+                .with_context(|| format!("Failed to hydrate fuzzy candidate FID={fid}"))?;
 
-    if filter.canon == Some(true) {
-        sql.push_str(" AND COALESCE(p.Canon, 0) = 1\n");
-    }
+            if let Some(row) = row {
+                hydrated.push(row);
+            }
+        }
 
-    if filter.legends == Some(true) {
-        sql.push_str(" AND COALESCE(p.Legends, 0) = 1\n");
-    }
+        // Defensive filter: only keep rows that originated from fuzzy hits.
+        let mut filtered: Vec<PlanetSearchRow> = hydrated
+            .into_iter()
+            .filter(|row| fid_set.contains(&row.fid))
+            .filter(|row| {
+                if let Some(ref wanted) = status_filter {
+                    let actual = row.status.as_deref().unwrap_or("").to_ascii_lowercase();
+                    if actual != *wanted {
+                        return false;
+                    }
+                }
 
-    let mut stmt = con
-        .prepare(&sql)
-        .context("Failed to prepare fuzzy filtered hydration query")?;
+                if let Some(ref wanted) = region_filter {
+                    let actual = row.region.as_deref().unwrap_or("").to_ascii_lowercase();
+                    if !actual.contains(wanted) {
+                        return false;
+                    }
+                }
 
-    let rows = stmt
-        .query_map(params_from_iter(params), |r| {
-            Ok(PlanetSearchRow {
-                fid: r.get::<_, i64>(0)?,
-                name: r.get::<_, String>(1)?,
-                region: r.get::<_, Option<String>>(2)?,
-                sector: r.get::<_, Option<String>>(3)?,
-                system: r.get::<_, Option<String>>(4)?,
-                grid: r.get::<_, Option<String>>(5)?,
-                x: r.get(6)?,
-                y: r.get(7)?,
-                canon: r.get(8)?,
-                legends: r.get(9)?,
-                status: r.get::<_, Option<String>>(10)?,
+                if let Some(ref wanted) = sector_filter {
+                    let actual = row.sector.as_deref().unwrap_or("").to_ascii_lowercase();
+                    if !actual.contains(wanted) {
+                        return false;
+                    }
+                }
+
+                if let Some(ref wanted) = grid_filter {
+                    let actual = row.grid.as_deref().unwrap_or("").to_ascii_lowercase();
+                    if actual != *wanted {
+                        return false;
+                    }
+                }
+
+                if filter.canon == Some(true) && !row.canon {
+                    return false;
+                }
+
+                if filter.legends == Some(true) && !row.legends {
+                    return false;
+                }
+
+                true
             })
-        })
-        .context("Failed to execute fuzzy filtered hydration query")?;
+            .collect();
 
-    let hydrated = rows.collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+        // Restore original fuzzy order.
+        filtered.sort_by_key(|row| order_by_fid.get(&row.fid).copied().unwrap_or(usize::MAX));
 
-    // Restore original fuzzy ranking after SQL hydration/filtering.
-    let rank: HashMap<i64, usize> = ordered_fids
-        .iter()
-        .enumerate()
-        .map(|(idx, fid)| (*fid, idx))
-        .collect();
+        // Stop if:
+        // 1) we have enough results
+        // 2) fuzzy_search returned fewer items than requested => no more candidates available
+        if filtered.len() >= target_limit || candidates.len() < fetch_limit {
+            filtered.truncate(target_limit);
+            return Ok(filtered);
+        }
 
-    let mut out = hydrated;
-    out.sort_by_key(|row| rank.get(&row.fid).copied().unwrap_or(usize::MAX));
-    out.truncate(filter.limit as usize);
-
-    Ok(out)
+        // Otherwise, widen the fuzzy window and try again.
+        fetch_limit = fetch_limit.saturating_mul(2);
+    }
 }
