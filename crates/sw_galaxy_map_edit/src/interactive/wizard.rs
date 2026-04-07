@@ -59,13 +59,15 @@ fn run_edit_session(con: &mut rusqlite::Connection, fid: i64) -> Result<()> {
             return Ok(());
         }
 
-        let field = EditableField::parse(field_input_trimmed).ok_or_else(|| {
-            anyhow!(
+        let Some(field) = EditableField::parse(field_input_trimmed) else {
+            println!(
                 "Unknown field '{}'. Allowed values: {}",
                 field_input_trimmed,
                 EditableField::accepted_names().join(", ")
-            )
-        })?;
+            );
+            println!();
+            continue;
+        };
 
         let help = if field.nullable() {
             "Leave empty to write NULL."
