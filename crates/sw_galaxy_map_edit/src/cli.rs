@@ -24,6 +24,9 @@ pub enum EditCommand {
 
     /// Show edit history for a planet.
     History(HistoryArgs),
+
+    /// Set a single field on a planet and persist the change.
+    Set(SetArgs),
 }
 
 #[derive(Debug, Args)]
@@ -60,4 +63,31 @@ pub struct HistoryArgs {
     /// Maximum number of history rows to display.
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct SetArgs {
+    /// Planet FID.
+    #[arg(long)]
+    pub fid: Option<i64>,
+
+    /// Exact planet name or alias.
+    #[arg(long)]
+    pub planet: Option<String>,
+
+    /// Field name to update.
+    #[arg(long)]
+    pub field: String,
+
+    /// New value to write. Use an empty string for NULL on nullable fields.
+    #[arg(long)]
+    pub value: String,
+
+    /// Reason for the change.
+    #[arg(long)]
+    pub reason: Option<String>,
+
+    /// Apply the change without interactive confirmation.
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }

@@ -69,6 +69,41 @@ impl EditableField {
             EditableField::Reference => "ref",
         }
     }
+
+    /// Parses a field name from CLI input.
+    pub fn parse(input: &str) -> Option<Self> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "planet" => Some(EditableField::Planet),
+            "region" => Some(EditableField::Region),
+            "sector" => Some(EditableField::Sector),
+            "system" => Some(EditableField::System),
+            "grid" => Some(EditableField::Grid),
+            "x" => Some(EditableField::X),
+            "y" => Some(EditableField::Y),
+            "lat" => Some(EditableField::Lat),
+            "long" => Some(EditableField::Long),
+            "status" => Some(EditableField::Status),
+            "reference" | "ref" => Some(EditableField::Reference),
+            _ => None,
+        }
+    }
+
+    /// Returns the accepted CLI field names.
+    pub fn accepted_names() -> &'static [&'static str] {
+        &[
+            "planet",
+            "region",
+            "sector",
+            "system",
+            "grid",
+            "x",
+            "y",
+            "lat",
+            "long",
+            "status",
+            "reference",
+        ]
+    }
 }
 
 impl fmt::Display for EditableField {
@@ -94,7 +129,7 @@ impl fmt::Display for EditableField {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue {
     Text(String),
-    Real{
+    Real {
         value: f64,
         raw: String, // Preserve original input for better error messages
     },
