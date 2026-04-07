@@ -27,6 +27,9 @@ pub enum EditCommand {
 
     /// Set a single field on a planet and persist the change.
     Set(SetArgs),
+
+    /// List editable fields supported by the tool.
+    Fields,
 }
 
 #[derive(Debug, Args)]

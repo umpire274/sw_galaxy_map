@@ -19,38 +19,29 @@ pub enum EditableField {
 }
 
 impl EditableField {
+    /// All fields available in the interactive editor.
+    pub const ALL: [EditableField; 11] = [
+        EditableField::Planet,
+        EditableField::Region,
+        EditableField::Sector,
+        EditableField::System,
+        EditableField::Grid,
+        EditableField::X,
+        EditableField::Y,
+        EditableField::Lat,
+        EditableField::Long,
+        EditableField::Status,
+        EditableField::Reference,
+    ];
+
     /// Returns all fields available in the interactive editor.
     pub fn all() -> &'static [EditableField] {
-        &[
-            EditableField::Planet,
-            EditableField::Region,
-            EditableField::Sector,
-            EditableField::System,
-            EditableField::Grid,
-            EditableField::X,
-            EditableField::Y,
-            EditableField::Lat,
-            EditableField::Long,
-            EditableField::Status,
-            EditableField::Reference,
-        ]
+        &Self::ALL
     }
 
     /// Returns true if the field supports NULL.
     pub fn nullable(self) -> bool {
-        match self {
-            EditableField::Planet => false,
-            EditableField::X => false,
-            EditableField::Y => false,
-            EditableField::Region
-            | EditableField::Sector
-            | EditableField::System
-            | EditableField::Grid
-            | EditableField::Lat
-            | EditableField::Long
-            | EditableField::Status
-            | EditableField::Reference => true,
-        }
+        !matches!(self, EditableField::Planet | EditableField::X | EditableField::Y)
     }
 
     /// Returns the SQL column name.
@@ -67,6 +58,23 @@ impl EditableField {
             EditableField::Long => "long",
             EditableField::Status => "status",
             EditableField::Reference => "ref",
+        }
+    }
+
+    /// Returns the preferred CLI field name.
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            EditableField::Planet => "planet",
+            EditableField::Region => "region",
+            EditableField::Sector => "sector",
+            EditableField::System => "system",
+            EditableField::Grid => "grid",
+            EditableField::X => "x",
+            EditableField::Y => "y",
+            EditableField::Lat => "lat",
+            EditableField::Long => "long",
+            EditableField::Status => "status",
+            EditableField::Reference => "reference",
         }
     }
 
@@ -102,26 +110,47 @@ impl EditableField {
             "long",
             "status",
             "reference",
+            "ref",
         ]
+    }
+
+    /// Returns the logical value type accepted by the field.
+    pub fn value_kind(self) -> FieldKind {
+        match self {
+            EditableField::X | EditableField::Y | EditableField::Lat | EditableField::Long => {
+                FieldKind::Real
+            }
+            EditableField::Planet
+            | EditableField::Region
+            | EditableField::Sector
+            | EditableField::System
+            | EditableField::Grid
+            | EditableField::Status
+            | EditableField::Reference => FieldKind::Text,
+        }
+    }
+
+    /// Returns a short human-readable description.
+    pub fn description(self) -> &'static str {
+        match self {
+            EditableField::Planet => "Primary planet display name",
+            EditableField::Region => "Galaxy region name",
+            EditableField::Sector => "Sector name",
+            EditableField::System => "System name",
+            EditableField::Grid => "Grid reference such as L-9",
+            EditableField::X => "Galactic X coordinate",
+            EditableField::Y => "Galactic Y coordinate",
+            EditableField::Lat => "Optional latitude value",
+            EditableField::Long => "Optional longitude value",
+            EditableField::Status => "Status or editorial note",
+            EditableField::Reference => "Reference/source field",
+        }
     }
 }
 
 impl fmt::Display for EditableField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            EditableField::Planet => "planet",
-            EditableField::Region => "region",
-            EditableField::Sector => "sector",
-            EditableField::System => "system",
-            EditableField::Grid => "grid",
-            EditableField::X => "x",
-            EditableField::Y => "y",
-            EditableField::Lat => "lat",
-            EditableField::Long => "long",
-            EditableField::Status => "status",
-            EditableField::Reference => "reference",
-        };
-        f.write_str(s)
+        f.write_str(self.cli_name())
     }
 }
 
@@ -131,7 +160,24 @@ pub enum FieldValue {
     Text(String),
     Real {
         value: f64,
-        raw: String, // Preserve original input for better error messages
+        raw: String,
     },
     Null,
+}
+
+/// Logical value type accepted by an editable field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    Text,
+    Real,
+}
+
+impl FieldKind {
+    /// Returns the lowercase textual representation of the field kind.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FieldKind::Text => "text",
+            FieldKind::Real => "real",
+        }
+    }
 }

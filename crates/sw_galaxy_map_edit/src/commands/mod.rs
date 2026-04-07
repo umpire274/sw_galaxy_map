@@ -1,4 +1,5 @@
 pub mod edit;
+pub mod fields;
 pub mod find;
 pub mod history;
 pub mod set;
@@ -12,6 +13,7 @@ pub fn run(args: EditCli) -> Result<()> {
         Some(EditCommand::Edit(cmd)) => edit::run(cmd),
         Some(EditCommand::History(cmd)) => history::run(cmd),
         Some(EditCommand::Set(cmd)) => set::run(cmd),
+        Some(EditCommand::Fields) => fields::run(),
         None => crate::interactive::wizard::run(),
     }
 }
