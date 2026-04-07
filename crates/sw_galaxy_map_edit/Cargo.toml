@@ -1,16 +1,19 @@
 [package]
 name = "sw_galaxy_map_edit"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
-description = "Command-line editor for maintaining planet records in sw_galaxy_map"
 license.workspace = true
-readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
+
+readme = "README.md"
+description = "Command-line editor for maintaining planet records in sw_galaxy_map"
+
+keywords = ["star-wars", "cli", "editor", "database", "tool"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "sw_galaxy_map_edit"
@@ -24,7 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 
-sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
+sw_galaxy_map_core = { version = "0.15.1", path = "../sw_galaxy_map_core" }
 
 [dependencies.inquire]
 version = "0.7.5"

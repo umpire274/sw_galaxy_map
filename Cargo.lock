@@ -4364,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_edit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
