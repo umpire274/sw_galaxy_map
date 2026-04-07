@@ -4,6 +4,7 @@ members = [
     "crates/sw_galaxy_map_cli",
     "crates/sw_galaxy_map_gui",
     "crates/sw_galaxy_map_sync",
+    "crates/sw_galaxy_map_edit"
 ]
 resolver = "3"
 
