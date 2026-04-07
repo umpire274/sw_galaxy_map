@@ -2,6 +2,32 @@
 
 All notable changes to this crate will be documented in this file.
 
+## [0.1.2] - 2026-04-08
+
+### Fixed
+
+* Fixed `find` command behavior: multi-match queries no longer abort and now correctly display result lists.
+* Fixed stale search results after renaming a planet by refreshing derived search tables (`planet_search`,
+  `planets_fts`).
+
+### Changed
+
+* Interactive editor now keeps the session open, allowing multiple field updates on the same planet until the user
+  exits (`exit` / `quit`).
+* Improved validation flow in interactive mode to avoid aborting the session on recoverable errors.
+
+### Refactored
+
+* Centralized field display helpers into a shared module (`edit::display`) to remove duplicated logic across commands.
+* Replaced multi-argument audit function with structured `AuditEntry` for better maintainability and Clippy compliance.
+
+### Notes
+
+* Spatial validation (grid ↔ coordinates consistency) remains intentionally deferred pending final coordinate model
+  definition.
+
+---
+
 ## [0.1.0] - 2026-04-07
 
 ### Added
