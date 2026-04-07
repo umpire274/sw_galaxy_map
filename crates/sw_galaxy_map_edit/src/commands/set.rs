@@ -6,7 +6,8 @@ use inquire::Confirm;
 use crate::cli::SetArgs;
 use crate::db::runtime::open_db;
 use crate::edit::apply::update_single_field_with_audit;
-use crate::edit::field::{EditableField, FieldValue};
+use crate::edit::display::{display_new_value, display_to_option, extract_field_value};
+use crate::edit::field::EditableField;
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
 use crate::output::validation::print_validation_issues;
@@ -99,44 +100,6 @@ pub fn run(args: SetArgs) -> Result<()> {
     print_planet(&updated);
 
     Ok(())
-}
-
-fn extract_field_value(p: &sw_galaxy_map_core::model::Planet, field: EditableField) -> String {
-    match field {
-        EditableField::Planet => p.planet.clone(),
-        EditableField::Region => opt_text(&p.region),
-        EditableField::Sector => opt_text(&p.sector),
-        EditableField::System => opt_text(&p.system),
-        EditableField::Grid => opt_text(&p.grid),
-        EditableField::X => format!("{:.3}", p.x),
-        EditableField::Y => format!("{:.3}", p.y),
-        EditableField::Lat => p
-            .lat
-            .map(|v| format!("{:.6}", v))
-            .unwrap_or_else(|| "NULL".to_string()),
-        EditableField::Long => p
-            .long
-            .map(|v| format!("{:.6}", v))
-            .unwrap_or_else(|| "NULL".to_string()),
-        EditableField::Status => opt_text(&p.status),
-        EditableField::Reference => opt_text(&p.reference),
-    }
-}
-
-fn display_new_value(value: &FieldValue) -> String {
-    match value {
-        FieldValue::Text(s) => s.clone(),
-        FieldValue::Real { raw, .. } => raw.clone(),
-        FieldValue::Null => "NULL".to_string(),
-    }
-}
-
-fn opt_text(value: &Option<String>) -> String {
-    value.clone().unwrap_or_else(|| "NULL".to_string())
-}
-
-fn display_to_option(value: &str) -> Option<&str> {
-    if value == "NULL" { None } else { Some(value) }
 }
 
 fn normalize_optional_reason(reason: Option<&str>) -> Option<&str> {
