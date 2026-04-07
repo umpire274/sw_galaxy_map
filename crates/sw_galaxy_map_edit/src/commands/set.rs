@@ -10,6 +10,8 @@ use crate::edit::field::{EditableField, FieldValue};
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
 use crate::resolve::planet::{resolve_by_fid, resolve_by_name_or_alias};
+use crate::output::validation::print_validation_issues;
+use crate::validate::field::{has_errors, validate_field_value};
 
 pub fn run(args: SetArgs) -> Result<()> {
     if args.fid.is_none() && args.planet.is_none() {
@@ -26,6 +28,17 @@ pub fn run(args: SetArgs) -> Result<()> {
 
     let parsed_value = parse_input(field, &args.value)?;
 
+    let issues = validate_field_value(field, &parsed_value);
+
+    if !issues.is_empty() {
+        println!();
+        print_validation_issues(&issues);
+    }
+
+    if has_errors(&issues) {
+        bail!("Cannot apply the change because validation failed.");
+    }
+    
     let mut con = open_db()?;
 
     let planet = if let Some(fid) = args.fid {

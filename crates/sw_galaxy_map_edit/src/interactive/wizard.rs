@@ -9,6 +9,8 @@ use crate::edit::field::{EditableField, FieldValue};
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
 use crate::resolve::planet::{resolve_by_fid, resolve_single, search};
+use crate::output::validation::print_validation_issues;
+use crate::validate::field::{has_errors, validate_field_value};
 
 /// Starts the interactive editing wizard.
 pub fn run() -> Result<()> {
@@ -47,6 +49,18 @@ pub fn run() -> Result<()> {
         .prompt()?;
 
     let parsed_value = parse_input(field, &raw_value)?;
+
+    let issues = validate_field_value(field, &parsed_value);
+
+    if !issues.is_empty() {
+        println!();
+        print_validation_issues(&issues);
+    }
+
+    if has_errors(&issues) {
+        anyhow::bail!("Cannot apply the change because validation failed.");
+    }
+
     let old_display = extract_field_value(&planet, field);
     let new_display = display_new_value(&parsed_value);
 
