@@ -6,6 +6,7 @@ mod interactive;
 mod db;
 mod output;
 mod resolve;
+mod edit;
 
 use anyhow::Result;
 use clap::Parser;

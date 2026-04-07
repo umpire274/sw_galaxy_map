@@ -1,124 +1,60 @@
 //! Guided interactive editor.
 
-use anyhow::{Result, bail};
-use inquire::{Select, Text, Confirm};
+use anyhow::{Result, anyhow, bail};
+use inquire::{Confirm, Select, Text};
 
 use crate::db::runtime::open_db;
+use crate::edit::apply::update_single_field;
+use crate::edit::field::{EditableField, FieldValue};
+use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
-use crate::resolve::planet::{resolve_single, search};
+use crate::resolve::planet::{resolve_by_fid, resolve_single, search};
 
-/// Entry point for interactive wizard.
+/// Starts the interactive editing wizard.
 pub fn run() -> Result<()> {
-    println!("🧭 sw_galaxy_map_edit interactive mode");
+    println!("sw_galaxy_map_edit interactive mode");
     println!();
 
     let con = open_db()?;
 
-    // STEP 1: query input
     let query = Text::new("Planet name, alias, or FID:")
         .with_help_message("Example: Coruscant, Tatooine, or 1234")
         .prompt()?;
 
     println!();
 
-    // STEP 2: resolve
     let planet = match resolve_single(&con, &query) {
         Ok(Some(p)) => p,
-        Ok(None) => {
-            // fallback search
-            let results = search(&con, &query, 20)?;
-
-            if results.is_empty() {
-                bail!("No planets found.");
-            }
-
-            // STEP 3: multi-select
-            let options: Vec<String> = results
-                .iter()
-                .map(|r| format!("{} (FID: {}, Grid: {})", r.name, r.fid, r.grid.clone().unwrap_or_default()))
-                .collect();
-
-            let selection = Select::new("Multiple matches found. Select one:", options).prompt()?;
-
-            let index = results
-                .iter()
-                .position(|r| {
-                    let label = format!("{} (FID: {}, Grid: {})", r.name, r.fid, r.grid.clone().unwrap_or_default());
-                    label == selection
-                })
-                .ok_or_else(|| anyhow::anyhow!("Selection mismatch"))?;
-
-            let fid = results[index].fid;
-            crate::resolve::planet::resolve_by_fid(&con, fid)?
-                .ok_or_else(|| anyhow::anyhow!("Failed to load selected planet"))?
-        }
-        Err(e) => {
-            // multiple match error → fallback search
-            let results = search(&con, &query, 20)?;
-
-            if results.is_empty() {
-                return Err(e);
-            }
-
-            let options: Vec<String> = results
-                .iter()
-                .map(|r| format!("{} (FID: {}, Grid: {})", r.name, r.fid, r.grid.clone().unwrap_or_default()))
-                .collect();
-
-            let selection = Select::new("Multiple matches found. Select one:", options).prompt()?;
-
-            let index = results
-                .iter()
-                .position(|r| {
-                    let label = format!("{} (FID: {}, Grid: {})", r.name, r.fid, r.grid.clone().unwrap_or_default());
-                    label == selection
-                })
-                .ok_or_else(|| anyhow::anyhow!("Selection mismatch"))?;
-
-            let fid = results[index].fid;
-            crate::resolve::planet::resolve_by_fid(&con, fid)?
-                .ok_or_else(|| anyhow::anyhow!("Failed to load selected planet"))?
-        }
+        Ok(None) => resolve_from_search(&con, &query)?,
+        Err(_) => resolve_from_search(&con, &query)?,
     };
 
-    println!();
     println!("Selected planet:");
     println!();
     print_planet(&planet);
+    println!();
 
-    // STEP 4: choose field
-    let fields = vec![
-        "planet",
-        "region",
-        "sector",
-        "system",
-        "grid",
-        "x",
-        "y",
-        "lat",
-        "long",
-        "status",
-        "reference",
-    ];
+    let field = Select::new("Select field to edit:", EditableField::all().to_vec()).prompt()?;
 
-    let field = Select::new("Select field to edit:", fields).prompt()?;
+    let help = if field.nullable() {
+        "Leave empty to write NULL."
+    } else {
+        "This field cannot be empty."
+    };
 
-    // STEP 5: input new value
-    let new_value = Text::new("New value:")
-        .with_help_message("Leave empty to set NULL (where allowed)")
+    let raw_value = Text::new("New value:")
+        .with_help_message(help)
         .prompt()?;
 
-    println!();
+    let parsed_value = parse_input(field, &raw_value)?;
 
-    // STEP 6: preview (semplice)
+    println!();
     println!("Preview change:");
     println!("Field : {}", field);
-    println!("Old   : {}", extract_field_value(&planet, &field));
-    println!("New   : {}", if new_value.trim().is_empty() { "NULL" } else { &new_value });
-
+    println!("Old   : {}", extract_field_value(&planet, field));
+    println!("New   : {}", display_new_value(&parsed_value));
     println!();
 
-    // STEP 7: confirm
     let confirm = Confirm::new("Apply this change?")
         .with_default(false)
         .prompt()?;
@@ -128,25 +64,73 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    println!("(Simulation only) Change accepted but not yet persisted.");
+    update_single_field(&con, planet.fid, field, &parsed_value)?;
+
+    let updated = resolve_by_fid(&con, planet.fid)?
+        .ok_or_else(|| anyhow!("Planet disappeared after update."))?;
+
+    println!();
+    println!("Change applied successfully.");
+    println!();
+    print_planet(&updated);
 
     Ok(())
 }
 
-/// Extracts a field value as string for preview.
-fn extract_field_value(p: &sw_galaxy_map_core::model::Planet, field: &str) -> String {
-    match field {
-        "planet" => p.planet.clone(),
-        "region" => p.region.clone().unwrap_or_default(),
-        "sector" => p.sector.clone().unwrap_or_default(),
-        "system" => p.system.clone().unwrap_or_default(),
-        "grid" => p.grid.clone().unwrap_or_default(),
-        "x" => format!("{:.3}", p.x),
-        "y" => format!("{:.3}", p.y),
-        "lat" => p.lat.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        "long" => p.long.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        "status" => p.status.clone().unwrap_or_default(),
-        "reference" => p.reference.clone().unwrap_or_default(),
-        _ => "-".to_string(),
+fn resolve_from_search(
+    con: &rusqlite::Connection,
+    query: &str,
+) -> Result<sw_galaxy_map_core::model::Planet> {
+    let results = search(con, query, 20)?;
+
+    if results.is_empty() {
+        bail!("No planets found.");
     }
+
+    let options: Vec<String> = results.iter().map(format_search_option).collect();
+
+    let selection = Select::new("Multiple matches found. Select one:", options).prompt()?;
+
+    let index = results
+        .iter()
+        .position(|r| format_search_option(r) == selection)
+        .ok_or_else(|| anyhow!("Selection mismatch."))?;
+
+    let fid = results[index].fid;
+
+    resolve_by_fid(con, fid)?
+        .ok_or_else(|| anyhow!("Failed to load selected planet."))
+}
+
+fn format_search_option(row: &sw_galaxy_map_core::model::PlanetSearchRow) -> String {
+    let grid = row.grid.as_deref().unwrap_or("-");
+    format!("{} (FID: {}, Grid: {})", row.name, row.fid, grid)
+}
+
+fn extract_field_value(p: &sw_galaxy_map_core::model::Planet, field: EditableField) -> String {
+    match field {
+        EditableField::Planet => p.planet.clone(),
+        EditableField::Region => opt_text(&p.region),
+        EditableField::Sector => opt_text(&p.sector),
+        EditableField::System => opt_text(&p.system),
+        EditableField::Grid => opt_text(&p.grid),
+        EditableField::X => format!("{:.3}", p.x),
+        EditableField::Y => format!("{:.3}", p.y),
+        EditableField::Lat => p.lat.map(|v| format!("{:.6}", v)).unwrap_or_else(|| "NULL".to_string()),
+        EditableField::Long => p.long.map(|v| format!("{:.6}", v)).unwrap_or_else(|| "NULL".to_string()),
+        EditableField::Status => opt_text(&p.status),
+        EditableField::Reference => opt_text(&p.reference),
+    }
+}
+
+fn display_new_value(value: &FieldValue) -> String {
+    match value {
+        FieldValue::Text(s) => s.clone(),
+        FieldValue::Real { raw, .. } => raw.clone(),
+        FieldValue::Null => "NULL".to_string(),
+    }
+}
+
+fn opt_text(value: &Option<String>) -> String {
+    value.clone().unwrap_or_else(|| "NULL".to_string())
 }
