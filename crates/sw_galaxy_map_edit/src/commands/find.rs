@@ -10,11 +10,11 @@ pub fn run(args: FindArgs) -> Result<()> {
     let con = open_db()?;
     let query = args.query.trim();
 
-    if let Ok(fid) = query.parse::<i64>() {
-        if let Some(planet) = resolve_by_fid(&con, fid)? {
-            print_planet(&planet);
-            return Ok(());
-        }
+    if let Ok(fid) = query.parse::<i64>()
+        && let Some(planet) = resolve_by_fid(&con, fid)?
+    {
+        print_planet(&planet);
+        return Ok(());
     }
 
     if let Some(planet) = resolve_by_name_or_alias(&con, query)? {

@@ -37,6 +37,8 @@ pub fn update_single_field_with_audit(
                  WHERE FID = ?3",
                 params![text, normalized, fid],
             )?;
+
+            refresh_planet_search_artifacts(&tx, fid)?;
         }
 
         (_, FieldValue::Text(text)) => {
@@ -101,4 +103,98 @@ fn ensure_planet_exists(con: &Connection, fid: i64) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn refresh_planet_search_artifacts(con: &rusqlite::Connection, fid: i64) -> Result<()> {
+    refresh_planet_search_row(con, fid)?;
+
+    if table_exists(con, "planets_fts")? {
+        refresh_planets_fts_row(con, fid)?;
+    }
+
+    Ok(())
+}
+
+fn refresh_planet_search_row(con: &rusqlite::Connection, fid: i64) -> Result<()> {
+    con.execute("DELETE FROM planet_search WHERE fid = ?1", params![fid])?;
+
+    con.execute(
+        r#"
+        INSERT INTO planet_search (
+            fid,
+            name,
+            name_norm,
+            region,
+            sector,
+            system,
+            grid,
+            x,
+            y,
+            canon,
+            legends,
+            zm,
+            deleted
+        )
+        SELECT
+            p.FID,
+            p.Planet,
+            p.planet_norm,
+            p.Region,
+            p.Sector,
+            p.System,
+            p.Grid,
+            p.X,
+            p.Y,
+            p.Canon,
+            p.Legends,
+            p.zm,
+            p.deleted
+        FROM planets p
+        WHERE p.FID = ?1
+        "#,
+        params![fid],
+    )?;
+
+    Ok(())
+}
+
+fn refresh_planets_fts_row(con: &rusqlite::Connection, fid: i64) -> Result<()> {
+    con.execute("DELETE FROM planets_fts WHERE fid = ?1", params![fid])?;
+
+    con.execute(
+        r#"
+        INSERT INTO planets_fts (
+            fid,
+            planet,
+            planet_norm,
+            region,
+            sector,
+            system,
+            grid
+        )
+        SELECT
+            p.FID,
+            p.Planet,
+            p.planet_norm,
+            COALESCE(p.Region, ''),
+            COALESCE(p.Sector, ''),
+            COALESCE(p.System, ''),
+            COALESCE(p.Grid, '')
+        FROM planets p
+        WHERE p.FID = ?1
+        "#,
+        params![fid],
+    )?;
+
+    Ok(())
+}
+
+fn table_exists(con: &rusqlite::Connection, table_name: &str) -> Result<bool> {
+    let exists: i64 = con.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![table_name],
+        |row| row.get(0),
+    )?;
+
+    Ok(exists > 0)
 }
