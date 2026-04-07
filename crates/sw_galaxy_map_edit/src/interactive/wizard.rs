@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow, bail};
 use inquire::{Confirm, Select, Text};
 
 use crate::db::runtime::open_db;
-use crate::edit::apply::update_single_field;
+use crate::edit::apply::update_single_field_with_audit;
 use crate::edit::field::{EditableField, FieldValue};
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
@@ -15,7 +15,7 @@ pub fn run() -> Result<()> {
     println!("sw_galaxy_map_edit interactive mode");
     println!();
 
-    let con = open_db()?;
+    let mut con = open_db()?;
 
     let query = Text::new("Planet name, alias, or FID:")
         .with_help_message("Example: Coruscant, Tatooine, or 1234")
@@ -47,13 +47,21 @@ pub fn run() -> Result<()> {
         .prompt()?;
 
     let parsed_value = parse_input(field, &raw_value)?;
+    let old_display = extract_field_value(&planet, field);
+    let new_display = display_new_value(&parsed_value);
 
     println!();
     println!("Preview change:");
     println!("Field : {}", field);
-    println!("Old   : {}", extract_field_value(&planet, field));
-    println!("New   : {}", display_new_value(&parsed_value));
+    println!("Old   : {}", old_display);
+    println!("New   : {}", new_display);
     println!();
+
+    let reason_raw = Text::new("Reason for change:")
+        .with_help_message("Describe why this field is being edited")
+        .prompt()?;
+
+    let reason = normalize_optional_text(&reason_raw);
 
     let confirm = Confirm::new("Apply this change?")
         .with_default(false)
@@ -64,7 +72,15 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    update_single_field(&con, planet.fid, field, &parsed_value)?;
+    update_single_field_with_audit(
+        &mut con,
+        planet.fid,
+        field,
+        &parsed_value,
+        display_to_option(&old_display),
+        display_to_option(&new_display),
+        reason.as_deref(),
+    )?;
 
     let updated = resolve_by_fid(&con, planet.fid)?
         .ok_or_else(|| anyhow!("Planet disappeared after update."))?;
@@ -116,8 +132,14 @@ fn extract_field_value(p: &sw_galaxy_map_core::model::Planet, field: EditableFie
         EditableField::Grid => opt_text(&p.grid),
         EditableField::X => format!("{:.3}", p.x),
         EditableField::Y => format!("{:.3}", p.y),
-        EditableField::Lat => p.lat.map(|v| format!("{:.6}", v)).unwrap_or_else(|| "NULL".to_string()),
-        EditableField::Long => p.long.map(|v| format!("{:.6}", v)).unwrap_or_else(|| "NULL".to_string()),
+        EditableField::Lat => p
+            .lat
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_else(|| "NULL".to_string()),
+        EditableField::Long => p
+            .long
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_else(|| "NULL".to_string()),
         EditableField::Status => opt_text(&p.status),
         EditableField::Reference => opt_text(&p.reference),
     }
@@ -133,4 +155,21 @@ fn display_new_value(value: &FieldValue) -> String {
 
 fn opt_text(value: &Option<String>) -> String {
     value.clone().unwrap_or_else(|| "NULL".to_string())
+}
+
+fn normalize_optional_text(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn display_to_option(value: &str) -> Option<&str> {
+    if value == "NULL" {
+        None
+    } else {
+        Some(value)
+    }
 }

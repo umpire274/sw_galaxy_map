@@ -1,19 +1,26 @@
 //! Database update helpers for editable planet fields.
 
 use anyhow::{Result, bail};
+use chrono::Utc;
 use rusqlite::{Connection, params};
 use sw_galaxy_map_core::utils::normalize_text;
 
+use crate::audit::log::insert_audit_entry;
 use crate::edit::field::{EditableField, FieldValue};
 
-/// Applies a single-field update to a planet row.
-pub fn update_single_field(
-    con: &Connection,
+/// Applies a single-field update to a planet row and writes an audit entry.
+pub fn update_single_field_with_audit(
+    con: &mut Connection,
     fid: i64,
     field: EditableField,
     value: &FieldValue,
+    old_value: Option<&str>,
+    new_value: Option<&str>,
+    reason: Option<&str>,
 ) -> Result<()> {
     ensure_planet_exists(con, fid)?;
+
+    let tx = con.transaction()?;
 
     match (field, value) {
         (EditableField::Planet, FieldValue::Text(text)) => {
@@ -23,7 +30,7 @@ pub fn update_single_field(
                 bail!("Planet name cannot normalize to an empty value.");
             }
 
-            con.execute(
+            tx.execute(
                 "UPDATE planets
                  SET Planet = ?1,
                      planet_norm = ?2
@@ -37,7 +44,7 @@ pub fn update_single_field(
                 "UPDATE planets SET {} = ?1 WHERE FID = ?2",
                 field.column_name()
             );
-            con.execute(&sql, params![text, fid])?;
+            tx.execute(&sql, params![text, fid])?;
         }
 
         (_, FieldValue::Real { value, .. }) => {
@@ -45,7 +52,7 @@ pub fn update_single_field(
                 "UPDATE planets SET {} = ?1 WHERE FID = ?2",
                 field.column_name()
             );
-            con.execute(&sql, params![value, fid])?;
+            tx.execute(&sql, params![value, fid])?;
         }
 
         (_, FieldValue::Null) => {
@@ -57,10 +64,25 @@ pub fn update_single_field(
                 "UPDATE planets SET {} = NULL WHERE FID = ?1",
                 field.column_name()
             );
-            con.execute(&sql, params![fid])?;
+            tx.execute(&sql, params![fid])?;
         }
     }
 
+    let edited_at = Utc::now().to_rfc3339();
+
+    insert_audit_entry(
+        &tx,
+        "planet",          // 👈 entity_type fisso per ora
+        fid,
+        &field.to_string(),
+        old_value,
+        new_value,
+        &edited_at,
+        reason,
+        Some("sw_galaxy_map_edit"),
+    )?;
+    
+    tx.commit()?;
     Ok(())
 }
 

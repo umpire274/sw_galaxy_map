@@ -7,6 +7,7 @@ mod db;
 mod output;
 mod resolve;
 mod edit;
+mod audit;
 
 use anyhow::Result;
 use clap::Parser;

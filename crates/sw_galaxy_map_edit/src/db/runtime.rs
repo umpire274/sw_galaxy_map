@@ -10,6 +10,7 @@ pub fn open_db() -> Result<rusqlite::Connection> {
     ensure_db_ready(&db_path)?;
     let mut con = sw_galaxy_map_core::db::open_db(&db_path.to_string_lossy())?;
     let _ = sw_galaxy_map_core::db::migrate::run(&mut con, false, false)?;
+    crate::audit::log::ensure_audit_table(&con)?;
     Ok(con)
 }
 
@@ -31,5 +32,6 @@ fn ensure_db_ready(db_path: &Path) -> Result<()> {
     println!("Overwritten existing: {}", report.overwritten_existing);
     println!("Downloaded features: {}", report.downloaded_features);
     println!("FTS enabled: {}", report.fts_enabled);
+
     Ok(())
 }
