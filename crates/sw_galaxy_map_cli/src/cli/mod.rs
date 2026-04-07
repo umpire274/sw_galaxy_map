@@ -6,7 +6,6 @@ pub(crate) mod dispatch;
 pub mod export;
 pub(crate) mod reports;
 pub(crate) mod shell;
-pub mod tui;
 pub mod typewriter;
 
 pub(crate) use crate::cli::db_runtime::{open_db_migrating, open_db_raw};
@@ -16,13 +15,8 @@ pub(crate) use crate::cli::reports::{
     print_migration_report,
 };
 use crate::cli::shell::run_interactive_shell;
-use crate::tui::{
-    NavigationPanelKind, TuiCommandOutput, build_navigation_panel, build_near_planet_panel,
-    build_planet_panel, build_route_show_output,
-};
 use anyhow::Result;
 use clap::Parser;
-use sw_galaxy_map_core::model::PlanetSearchRow;
 
 pub fn run() -> Result<()> {
     let cli = args::Cli::parse();
