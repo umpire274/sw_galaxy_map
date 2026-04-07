@@ -9,8 +9,8 @@ use crate::edit::apply::update_single_field_with_audit;
 use crate::edit::field::{EditableField, FieldValue};
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
-use crate::resolve::planet::{resolve_by_fid, resolve_by_name_or_alias};
 use crate::output::validation::print_validation_issues;
+use crate::resolve::planet::{resolve_by_fid, resolve_by_name_or_alias};
 use crate::validate::field::{has_errors, validate_field_value};
 
 pub fn run(args: SetArgs) -> Result<()> {
@@ -38,7 +38,7 @@ pub fn run(args: SetArgs) -> Result<()> {
     if has_errors(&issues) {
         bail!("Cannot apply the change because validation failed.");
     }
-    
+
     let mut con = open_db()?;
 
     let planet = if let Some(fid) = args.fid {
@@ -136,11 +136,7 @@ fn opt_text(value: &Option<String>) -> String {
 }
 
 fn display_to_option(value: &str) -> Option<&str> {
-    if value == "NULL" {
-        None
-    } else {
-        Some(value)
-    }
+    if value == "NULL" { None } else { Some(value) }
 }
 
 fn normalize_optional_reason(reason: Option<&str>) -> Option<&str> {

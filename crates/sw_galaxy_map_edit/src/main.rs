@@ -1,13 +1,13 @@
 //! Entry point for the sw_galaxy_map_edit binary.
 
+mod audit;
 mod cli;
 mod commands;
-mod interactive;
 mod db;
+mod edit;
+mod interactive;
 mod output;
 mod resolve;
-mod edit;
-mod audit;
 mod validate;
 
 use anyhow::Result;

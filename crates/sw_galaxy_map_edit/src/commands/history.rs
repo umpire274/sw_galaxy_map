@@ -1,11 +1,11 @@
 //! History command implementation.
 
-use anyhow::{bail, Result};
 use crate::audit::history::load_entity_history;
 use crate::cli::HistoryArgs;
 use crate::db::runtime::open_db;
 use crate::output::history::print_history_rows;
 use crate::resolve::planet::{resolve_by_fid, resolve_by_name_or_alias};
+use anyhow::{Result, bail};
 
 pub fn run(args: HistoryArgs) -> Result<()> {
     if args.fid.is_none() && args.planet.is_none() {

@@ -30,18 +30,21 @@ pub fn ensure_audit_table(con: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Represents a single audit log entry to be inserted.
+#[derive(Debug)]
+pub struct AuditEntry<'a> {
+    pub entity_type: &'a str,
+    pub entity_id: i64,
+    pub field_name: &'a str,
+    pub old_value: Option<&'a str>,
+    pub new_value: Option<&'a str>,
+    pub edited_at: &'a str,
+    pub reason: Option<&'a str>,
+    pub source: Option<&'a str>,
+}
+
 /// Writes a single audit log entry.
-pub fn insert_audit_entry(
-    con: &Connection,
-    entity_type: &str,
-    entity_id: i64,
-    field_name: &str,
-    old_value: Option<&str>,
-    new_value: Option<&str>,
-    edited_at: &str,
-    reason: Option<&str>,
-    source: Option<&str>,
-) -> Result<()> {
+pub fn insert_audit_entry(con: &Connection, entry: &AuditEntry) -> Result<()> {
     con.execute(
         r#"
         INSERT INTO entity_edit_log (
@@ -57,14 +60,14 @@ pub fn insert_audit_entry(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#,
         params![
-            entity_type,
-            entity_id,
-            field_name,
-            old_value,
-            new_value,
-            edited_at,
-            reason,
-            source
+            entry.entity_type,
+            entry.entity_id,
+            entry.field_name,
+            entry.old_value,
+            entry.new_value,
+            entry.edited_at,
+            entry.reason,
+            entry.source
         ],
     )?;
 

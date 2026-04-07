@@ -5,7 +5,7 @@ use chrono::Utc;
 use rusqlite::{Connection, params};
 use sw_galaxy_map_core::utils::normalize_text;
 
-use crate::audit::log::insert_audit_entry;
+use crate::audit::log::{AuditEntry, insert_audit_entry};
 use crate::edit::field::{EditableField, FieldValue};
 
 /// Applies a single-field update to a planet row and writes an audit entry.
@@ -70,18 +70,21 @@ pub fn update_single_field_with_audit(
 
     let edited_at = Utc::now().to_rfc3339();
 
-    insert_audit_entry(
-        &tx,
-        "planet",          // 👈 entity_type fisso per ora
-        fid,
-        &field.to_string(),
+    let field_name = field.to_string();
+
+    let entry = AuditEntry {
+        entity_type: "planet",
+        entity_id: fid,
+        field_name: &field_name,
         old_value,
         new_value,
-        &edited_at,
+        edited_at: &edited_at,
         reason,
-        Some("sw_galaxy_map_edit"),
-    )?;
-    
+        source: Some("sw_galaxy_map_edit"),
+    };
+
+    insert_audit_entry(&tx, &entry)?;
+
     tx.commit()?;
     Ok(())
 }

@@ -41,7 +41,10 @@ impl EditableField {
 
     /// Returns true if the field supports NULL.
     pub fn nullable(self) -> bool {
-        !matches!(self, EditableField::Planet | EditableField::X | EditableField::Y)
+        !matches!(
+            self,
+            EditableField::Planet | EditableField::X | EditableField::Y
+        )
     }
 
     /// Returns the SQL column name.
@@ -158,10 +161,7 @@ impl fmt::Display for EditableField {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue {
     Text(String),
-    Real {
-        value: f64,
-        raw: String,
-    },
+    Real { value: f64, raw: String },
     Null,
 }
 

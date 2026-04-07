@@ -8,8 +8,8 @@ use crate::edit::apply::update_single_field_with_audit;
 use crate::edit::field::{EditableField, FieldValue};
 use crate::edit::parser::parse_input;
 use crate::output::planet::print_planet;
-use crate::resolve::planet::{resolve_by_fid, resolve_single, search};
 use crate::output::validation::print_validation_issues;
+use crate::resolve::planet::{resolve_by_fid, resolve_single, search};
 use crate::validate::field::{has_errors, validate_field_value};
 
 /// Starts the interactive editing wizard.
@@ -44,9 +44,7 @@ pub fn run() -> Result<()> {
         "This field cannot be empty."
     };
 
-    let raw_value = Text::new("New value:")
-        .with_help_message(help)
-        .prompt()?;
+    let raw_value = Text::new("New value:").with_help_message(help).prompt()?;
 
     let parsed_value = parse_input(field, &raw_value)?;
 
@@ -128,8 +126,7 @@ fn resolve_from_search(
 
     let fid = results[index].fid;
 
-    resolve_by_fid(con, fid)?
-        .ok_or_else(|| anyhow!("Failed to load selected planet."))
+    resolve_by_fid(con, fid)?.ok_or_else(|| anyhow!("Failed to load selected planet."))
 }
 
 fn format_search_option(row: &sw_galaxy_map_core::model::PlanetSearchRow) -> String {
@@ -181,9 +178,5 @@ fn normalize_optional_text(raw: &str) -> Option<String> {
 }
 
 fn display_to_option(value: &str) -> Option<&str> {
-    if value == "NULL" {
-        None
-    } else {
-        Some(value)
-    }
+    if value == "NULL" { None } else { Some(value) }
 }

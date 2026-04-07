@@ -6,8 +6,8 @@ use crate::edit::field::EditableField;
 
 pub fn run() -> Result<()> {
     println!(
-        "{:<12}  {:<10}  {:<6}  {:<8}  {}",
-        "Field", "DB column", "Type", "Nullable", "Description"
+        "{:<12}  {:<10}  {:<6}  {:<8}  Description",
+        "Field", "DB column", "Type", "Nullable"
     );
     println!(
         "{:-<12}  {:-<10}  {:-<6}  {:-<8}  {:-<1}",

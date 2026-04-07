@@ -1,11 +1,11 @@
 //! Edit command implementation.
 
 use crate::cli::EditArgs;
-use anyhow::{Result, bail};
 use crate::db::runtime::open_db;
 use crate::interactive::wizard;
 use crate::output::planet::print_planet;
 use crate::resolve::planet::{resolve_by_fid, resolve_by_name_or_alias};
+use anyhow::{Result, bail};
 
 pub fn run(args: EditArgs) -> Result<()> {
     if args.interactive {

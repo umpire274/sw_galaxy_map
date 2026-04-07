@@ -1,10 +1,10 @@
 //! Find command implementation.
 
 use crate::cli::FindArgs;
-use anyhow::Result;
 use crate::db::runtime::open_db;
 use crate::output::planet::{print_planet, print_search_results};
 use crate::resolve::planet::{resolve_single, search};
+use anyhow::Result;
 
 pub fn run(args: FindArgs) -> Result<()> {
     let con = open_db()?;
