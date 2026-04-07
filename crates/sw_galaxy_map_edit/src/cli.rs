@@ -21,6 +21,9 @@ pub enum EditCommand {
 
     /// Open a planet editing session.
     Edit(EditArgs),
+
+    /// Show edit history for a planet.
+    History(HistoryArgs),
 }
 
 #[derive(Debug, Args)]
@@ -42,4 +45,19 @@ pub struct EditArgs {
     /// Start the guided interactive editor.
     #[arg(long)]
     pub interactive: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct HistoryArgs {
+    /// Planet FID.
+    #[arg(long)]
+    pub fid: Option<i64>,
+
+    /// Exact planet name or alias.
+    #[arg(long)]
+    pub planet: Option<String>,
+
+    /// Maximum number of history rows to display.
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
 }
