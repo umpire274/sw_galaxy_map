@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_cli"
-version = "0.15.2"
+version = "0.15.3"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

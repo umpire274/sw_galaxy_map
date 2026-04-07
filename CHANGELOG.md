@@ -19,6 +19,29 @@ Starting after `0.15.1`, workspace crates use **independent versioning**.
 
 ## sw_galaxy_map_cli
 
+### [0.15.3] - 2026-04-07
+
+### ♻️ Refactor
+
+- Completed the TUI refactor by moving the remaining interactive runtime out of the CLI module tree into `src/tui/`.
+- Replaced the former monolithic TUI file with dedicated modules:
+    - `tui/runtime.rs`
+    - `tui/app.rs`
+    - `tui/render.rs`
+    - `tui/input.rs`
+    - `tui/log.rs`
+- Kept `tui/bridge.rs`, `tui/panels.rs`, and `tui/types.rs` as the shared TUI integration layer.
+- Improved separation of concerns between:
+    - TUI runtime bootstrap
+    - TUI state management
+    - rendering
+    - input handling
+    - log/typewriter orchestration
+- Removed residual TUI-specific dependencies from the CLI core, further reducing the responsibility of `cli/*`.
+- Preserved existing behavior while substantially improving maintainability and internal structure.
+
+---
+
 ### [0.15.2] - 2026-04-04
 
 ### ♻️ Refactor
