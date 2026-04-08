@@ -4326,12 +4326,14 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sw_galaxy_map_cli"
-version = "0.15.3"
+version = "0.15.4"
 dependencies = [
  "anyhow",
  "atty",
+ "chrono",
  "clap",
  "crossterm 0.29.0",
+ "csv",
  "owo-colors",
  "ratatui",
  "rusqlite",

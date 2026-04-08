@@ -1,7 +1,9 @@
+use crate::cli::args;
 use crate::tui::app::App;
 use crate::tui::input::handle_key;
 use crate::tui::log::update_typewriter;
 use crate::tui::render::ui;
+use crate::tui::{TuiCommandOutput, tui_default_output};
 use crossterm::event::KeyEventKind;
 use crossterm::{
     event::{self, Event},
@@ -58,4 +60,48 @@ fn run_app(
     }
 
     Ok(())
+}
+
+pub(crate) fn tui_only_cli_message(cmd: &args::DbCommands) -> Option<String> {
+    match cmd {
+        args::DbCommands::Backup(args) => {
+            let mut cli_cmd = "sw_galaxy_map db backup".to_string();
+
+            if let Some(output) = &args.output {
+                cli_cmd.push_str(&format!(" --output {}", output.display()));
+            }
+
+            Some(format!(
+                "❌ This command is available only in CLI mode.\nRun it from a terminal:\n{}",
+                cli_cmd
+            ))
+        }
+        args::DbCommands::Export(export_args) => {
+            let mut cli_cmd = format!("sw_galaxy_map db export --table {}", export_args.table);
+
+            if export_args.csv {
+                cli_cmd.push_str(" --csv");
+            }
+
+            if export_args.json {
+                cli_cmd.push_str(" --json");
+            }
+
+            if let Some(output) = &export_args.output {
+                cli_cmd.push_str(&format!(" --output {}", output.display()));
+            }
+
+            Some(format!(
+                "❌ This command is available only in CLI mode.\nRun it from a terminal:\n{}",
+                cli_cmd
+            ))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn tui_log_only(message: impl Into<String>) -> TuiCommandOutput {
+    let mut out = tui_default_output();
+    out.log_lines.push(message.into());
+    out
 }

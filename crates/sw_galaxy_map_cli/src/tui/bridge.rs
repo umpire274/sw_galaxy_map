@@ -3,7 +3,8 @@ use crate::cli::commands::route::resolve_show_for_tui;
 use crate::cli::{args, commands};
 use crate::tui::{
     NavigationPanelKind, TuiCommandOutput, build_navigation_panel, build_near_planet_panel,
-    build_planet_panel, build_route_show_output, tui_default_output,
+    build_planet_panel, build_route_show_output, tui_default_output, tui_log_only,
+    tui_only_cli_message,
 };
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use sw_galaxy_map_core::model::RouteLoaded;
@@ -431,11 +432,13 @@ pub(crate) fn run_one_shot_for_tui(
                 Ok(out)
             }
             _ => {
-                let mut out = tui_default_output();
-                out.log_lines.push(
-                    "This db subcommand is not available in TUI. Use the CLI directly.".to_string(),
-                );
-                Ok(out)
+                if let Some(message) = tui_only_cli_message(cmd) {
+                    Ok(tui_log_only(message))
+                } else {
+                    Ok(tui_log_only(
+                        "This db subcommand is not available in TUI. Use the CLI directly.",
+                    ))
+                }
             }
         },
 

@@ -216,6 +216,12 @@ pub enum DbCommands {
         #[arg(long)]
         report: Option<String>,
     },
+
+    /// Create a physical backup copy of the SQLite database.
+    Backup(DbBackupArgs),
+
+    /// Export a database table to CSV or JSON.
+    Export(DbExportArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -575,4 +581,36 @@ pub struct RouteExplainArgs {
     /// Columns: seq, x, y, segment_parsec, cumulative_parsec, label
     #[arg(long = "csv")]
     pub csv: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct DbBackupArgs {
+    /// Destination directory for the backup file.
+    #[arg(long)]
+    pub output: Option<std::path::PathBuf>,
+}
+
+/// Export a database table to CSV or JSON.
+#[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("format")
+        .required(true)
+        .args(["csv", "json"])
+))]
+pub struct DbExportArgs {
+    /// Table name to export.
+    #[arg(long)]
+    pub table: String,
+
+    /// Export table rows as CSV.
+    #[arg(long)]
+    pub csv: bool,
+
+    /// Export table rows as JSON.
+    #[arg(long)]
+    pub json: bool,
+
+    /// Destination directory for the export file.
+    #[arg(long)]
+    pub output: Option<std::path::PathBuf>,
 }
