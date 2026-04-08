@@ -547,8 +547,8 @@ fn convert_table_coordinates_to_ly(tx: &Transaction<'_>, table_name: &str) -> ru
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
-            row.get::<_, f64>(1)?,
-            row.get::<_, f64>(2)?,
+            row.get::<_, Option<f64>>(1)?,
+            row.get::<_, Option<f64>>(2)?,
             row.get::<_, Option<String>>(3)?,
         ))
     })?;
@@ -556,11 +556,19 @@ fn convert_table_coordinates_to_ly(tx: &Transaction<'_>, table_name: &str) -> ru
     let mut updates = Vec::new();
 
     for row in rows {
-        let (key, x, y, grid_unit) = row?;
+        let (key, x_opt, y_opt, grid_unit) = row?;
         let unit = grid_unit.as_deref().unwrap_or("pc");
 
-        if unit == "pc" {
-            let (new_x, new_y) = convert_coordinates_to_ly_pair(x, y)?;
+        if unit == "pc"
+            && let (Some(x), Some(y)) = (x_opt, y_opt)
+        {
+            let (new_x, new_y) = crate::utils::normalize::convert_coordinates_raw(x, y, "ly")
+                .ok_or_else(|| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                        "Failed to convert coordinates",
+                    )))
+                })?;
+
             updates.push((key, new_x, new_y));
         }
     }
@@ -579,15 +587,16 @@ fn convert_table_coordinates_to_ly(tx: &Transaction<'_>, table_name: &str) -> ru
         tx.execute(&update_sql, rusqlite::params![new_x, new_y, key])?;
     }
 
-    Ok(())
-}
+    let update_unit_sql = format!(
+        "UPDATE {table}
+         SET grid_unit = 'ly'
+         WHERE grid_unit IS NULL OR grid_unit = 'pc'",
+        table = table_name
+    );
 
-fn convert_coordinates_to_ly_pair(x: f64, y: f64) -> rusqlite::Result<(f64, f64)> {
-    crate::utils::normalize::convert_coordinates_to(x, y, "ly").ok_or_else(|| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-            "Failed to convert coordinates to light years.",
-        )))
-    })
+    tx.execute(&update_unit_sql, [])?;
+
+    Ok(())
 }
 
 /// Run schema migrations up to SCHEMA_VERSION.

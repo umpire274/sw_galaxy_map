@@ -1,6 +1,6 @@
 pub mod formatting;
 pub mod fuzzy;
-pub(crate) mod normalize;
+pub mod normalize;
 
 pub use normalize::normalize_text;
 pub mod time;

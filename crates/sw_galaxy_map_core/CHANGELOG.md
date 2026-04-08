@@ -19,6 +19,9 @@
 
 * Updated coordinate system from **parsecs (pc)** to **light years (ly)** to align with the new official galaxy map.
 * All existing `X` and `Y` coordinates are automatically converted from parsecs to light years during migration.
+* Migrated stored coordinates from parsecs to light years while preserving raw precision in the database.
+* Added separate raw and display coordinate conversion helpers so UI layers can present rounded values without affecting
+  stored data.
 
 ### Removed
 
@@ -29,6 +32,8 @@
 * Ensured consistency of derived search structures after coordinate conversion by rebuilding `planet_search` data during
   migration.
 * Improved migration robustness by handling nullable fields and ensuring idempotent schema updates.
+* Fixed v13 migration to correctly handle NULL coordinates in `planets_unknown`, preventing migration failures on
+  incomplete records.
 
 ### Migration Notes
 
