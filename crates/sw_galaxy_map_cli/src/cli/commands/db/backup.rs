@@ -11,8 +11,8 @@ use crate::cli::commands::db::utils::human_size;
 use sw_galaxy_map_core::db::db_status::resolve_db_path;
 
 /// Creates a physical backup copy of the current SQLite database.
-pub fn run(args: &DbBackupArgs) -> Result<()> {
-    let db_path = resolve_db_path(None)?;
+pub fn run(db_override: Option<String>, args: &DbBackupArgs) -> Result<()> {
+    let db_path = resolve_db_path(db_override)?;
 
     if !db_path.exists() {
         bail!("Database file not found: {}", db_path.display());

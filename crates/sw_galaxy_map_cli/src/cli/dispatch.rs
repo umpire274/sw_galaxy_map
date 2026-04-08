@@ -120,9 +120,9 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                 Ok(())
             }
 
-            args::DbCommands::Backup(args) => commands::db::backup::run(args),
+            args::DbCommands::Backup(args) => commands::db::backup::run(cli.db.clone(), args),
 
-            args::DbCommands::Export(args) => commands::db::export::run(args),
+            args::DbCommands::Export(args) => commands::db::export::run(cli.db.clone(), args),
         },
 
         args::Commands::Search {

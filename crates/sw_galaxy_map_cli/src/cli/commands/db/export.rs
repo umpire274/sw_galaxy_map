@@ -28,7 +28,7 @@ const ALLOWED_TABLES: &[&str] = &[
 ];
 
 /// Exports a database table to CSV or JSON.
-pub fn run(args: &DbExportArgs) -> Result<()> {
+pub fn run(db_override: Option<String>, args: &DbExportArgs) -> Result<()> {
     let table = args.table.trim();
 
     if table.is_empty() {
@@ -43,7 +43,7 @@ pub fn run(args: &DbExportArgs) -> Result<()> {
         );
     }
 
-    let db_path = resolve_db_path(None)?;
+    let db_path = resolve_db_path(db_override)?;
     if !db_path.exists() {
         bail!("Database file not found: {}", db_path.display());
     }
