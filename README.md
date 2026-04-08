@@ -10,11 +10,12 @@
 
 ## 🌌 Overview
 
-**sw_galaxy_map** is a Rust workspace for exploring the Star Wars galaxy using a local SQLite database, with:
+**sw_galaxy_map** is a Rust workspace for exploring and maintaining the Star Wars galaxy using a local SQLite database, with:
 
 * 🖥️ **CLI interface**
 * 🧭 **Interactive TUI (ratatui)**
 * 🪟 **GUI (egui/eframe)**
+* ✏️ **Dedicated editing tool for data curation**
 
 The application works **fully offline** once the database is initialized.
 
@@ -30,6 +31,7 @@ The application works **fully offline** once the database is initialized.
 * 📊 Galaxy statistics and analytics
 * 🖥️ Interactive TUI with panels and navigation
 * 📦 CSV export and JSON output support
+* ✏️ Manual data editing with audit tracking
 
 ---
 
@@ -41,6 +43,46 @@ The project is organized as a Cargo workspace:
 * `sw_galaxy_map_cli` — CLI + TUI interface
 * `sw_galaxy_map_gui` — graphical interface (egui)
 * `sw_galaxy_map_sync` — CSV synchronization engine
+* `sw_galaxy_map_edit` — command-line editor for manual data curation
+
+---
+
+## ✏️ Editing tool
+
+The `sw_galaxy_map_edit` crate provides a dedicated tool for maintaining planet data.
+
+### Features
+
+* interactive editing wizard
+* non-interactive updates via CLI
+* field-level validation
+* change preview
+* audit trail (`entity_edit_log`)
+* history inspection
+
+### Example usage
+
+```bash
+cargo run -p sw_galaxy_map_edit
+```
+
+Interactive session:
+
+```text
+Field to edit: region
+New value: Unknown Regions
+Apply this change? yes
+```
+
+Non-interactive update:
+
+```bash
+cargo run -p sw_galaxy_map_edit -- set \
+  --fid 1970 \
+  --field x \
+  --value 1834.100 \
+  --reason "coordinate update"
+```
 
 ---
 
@@ -62,6 +104,12 @@ cargo run -p sw_galaxy_map_cli
 
 ```bash
 cargo run -p sw_galaxy_map_gui
+```
+
+### Run editor
+
+```bash
+cargo run -p sw_galaxy_map_edit
 ```
 
 ---
@@ -89,14 +137,6 @@ sw_galaxy_map search tatooine \
   --grid "R-16" \
   --status active \
   --canon
-```
-
-### Output example
-
-```
-FID      Planet        Region        Sector        System        Grid     Status   X        Y
-----------------------------------------------------------------------------------------------
-1234     Tatooine      Outer Rim     Arkanis       Tatoo         R-16     active   1040.12  -333.45
 ```
 
 ---
@@ -128,12 +168,6 @@ Includes:
 * detour analysis
 * routing diagnostics
 
-### CSV export
-
-```bash
-sw_galaxy_map route explain <id> --csv route.csv
-```
-
 ---
 
 ## 📊 Galaxy statistics
@@ -141,14 +175,6 @@ sw_galaxy_map route explain <id> --csv route.csv
 ```bash
 sw_galaxy_map db stats --top 10
 ```
-
-Includes:
-
-* planets by status
-* canon / legends distribution
-* top regions and sectors
-* grid coverage
-* routing statistics
 
 ---
 
@@ -158,19 +184,12 @@ Includes:
 
 ```bash
 sw_galaxy_map unknown list
-sw_galaxy_map unknown list --page 2
 ```
 
 ### Search nearby known planets
 
 ```bash
 sw_galaxy_map unknown search <id> --near 1500
-```
-
-### Find unknown near a known planet
-
-```bash
-sw_galaxy_map unknown near tatooine --range 1500
 ```
 
 ---
@@ -203,13 +222,6 @@ sw_galaxy_map db rebuild-search
 sw_galaxy_map db sync --csv data.csv
 ```
 
-Features:
-
-* incremental updates
-* status tracking (`active`, `inserted`, `modified`, etc.)
-* XLSX report generation
-* dry-run support
-
 ---
 
 ## 🖥️ TUI (Interactive Mode)
@@ -218,15 +230,8 @@ The TUI provides a full interactive experience:
 
 * 📜 Log panel (left)
 * 🌍 Planet panels (right)
-* 🧭 Navigation panel (route / near data)
+* 🧭 Navigation panel
 * ⌨️ Command input with history
-
-### Key bindings
-
-* `Tab` / `Shift+Tab` → switch focus
-* `↑ ↓` → scroll
-* `Enter` → execute command
-* `Esc` → exit
 
 ---
 
@@ -237,17 +242,7 @@ The routing engine uses:
 * Euclidean geometry (parsecs)
 * planetary obstacles (circles)
 * dynamic waypoint generation
-* detour scoring system:
-
-  * geometric penalty
-  * turn penalty
-  * proximity penalty
-
-### ETA estimation
-
-* region-based compression factors
-* hyperdrive class scaling
-* detour multipliers
+* detour scoring system
 
 ---
 
@@ -262,6 +257,7 @@ Main tables:
 * `routes`
 * `route_waypoints`
 * `route_detours`
+* `entity_edit_log`
 
 ---
 
@@ -271,6 +267,12 @@ From crates.io:
 
 ```bash
 cargo install sw_galaxy_map_cli
+```
+
+Editor:
+
+```bash
+cargo install sw_galaxy_map_edit
 ```
 
 ---
@@ -287,8 +289,7 @@ cargo install sw_galaxy_map_cli
 
 Planetary data derived from:
 
-* [http://www.swgalaxymap.com/](http://www.swgalaxymap.com/)
-  by **Henry Bernberg**
-* [https://www.starwars.com/star-wars-galaxy-map](https://www.starwars.com/star-wars-galaxy-map)
+* http://www.swgalaxymap.com/ — **Henry Bernberg**
+* https://www.starwars.com/star-wars-galaxy-map
 
 This project is for **educational and non-commercial use only** and is not affiliated with Lucasfilm or Disney.
