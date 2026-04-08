@@ -8,6 +8,7 @@ pub(crate) mod runtime;
 pub(crate) mod types;
 
 pub use runtime::run_tui;
+pub(crate) use runtime::{tui_log_only, tui_only_cli_message};
 
 pub(crate) use panels::{
     build_navigation_panel, build_near_planet_panel, build_planet_panel, build_route_show_output,

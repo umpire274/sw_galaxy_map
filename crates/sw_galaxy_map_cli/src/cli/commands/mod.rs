@@ -1,3 +1,4 @@
+pub(crate) mod db;
 pub mod info;
 pub mod near;
 pub mod route;

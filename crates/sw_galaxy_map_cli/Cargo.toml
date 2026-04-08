@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_cli"
-version = "0.15.3"
+version = "0.15.4"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -28,6 +28,8 @@ sw_galaxy_map_core = { version = "0.15.1", path = "../sw_galaxy_map_core" }
 sw_galaxy_map_sync = { version = "0.2.0", path = "../sw_galaxy_map_sync" }
 crossterm = "0.29.0"
 ratatui = "0.30.0"
+chrono = "0.4.44"
+csv = "1.4.0"
 
 [[bin]]
 name = "sw_galaxy_map"
