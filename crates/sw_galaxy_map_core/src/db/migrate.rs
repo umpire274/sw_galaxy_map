@@ -1,3 +1,4 @@
+use crate::db::provision::rebuild_planet_search_public;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
@@ -18,7 +19,7 @@ pub struct MigrationReport {
 }
 
 const START_SCHEMA_VERSION: i64 = 3;
-const LATEST_SCHEMA_VERSION: i64 = 12;
+const LATEST_SCHEMA_VERSION: i64 = 13;
 
 struct MigrationStep {
     from: i64,
@@ -82,6 +83,12 @@ fn migration_steps() -> &'static [MigrationStep] {
             to: 12,
             label: "planets unknown staging alignment",
             apply: m_to_v12,
+        },
+        MigrationStep {
+            from: 12,
+            to: 13,
+            label: "coordinates normalization + grid_unit",
+            apply: m_to_v13,
         },
     ]
 }
@@ -486,6 +493,108 @@ fn m_to_v12(tx: &Transaction<'_>) -> Result<()> {
         "#,
     )
     .context("Failed to migrate schema to v12 (align planets_unknown with planets)")?;
+
+    Ok(())
+}
+
+fn m_to_v13(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute("DROP TABLE IF EXISTS planets_official", [])?;
+
+    if !column_exists(tx, "planets", "grid_unit")? {
+        tx.execute(
+            "ALTER TABLE planets ADD COLUMN grid_unit TEXT NOT NULL DEFAULT 'pc'",
+            [],
+        )?;
+    }
+
+    if !column_exists(tx, "planets_unknown", "grid_unit")? {
+        tx.execute(
+            "ALTER TABLE planets_unknown ADD COLUMN grid_unit TEXT NOT NULL DEFAULT 'pc'",
+            [],
+        )?;
+    }
+
+    convert_table_coordinates_to_ly(tx, "planets")?;
+    convert_table_coordinates_to_ly(tx, "planets_unknown")?;
+
+    rebuild_planet_search_public(tx)?;
+
+    Ok(())
+}
+
+fn convert_table_coordinates_to_ly(tx: &Transaction<'_>, table_name: &str) -> rusqlite::Result<()> {
+    let key_column = match table_name {
+        "planets" => "FID",
+        "planets_unknown" => "id",
+        other => {
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::other(format!(
+                    "Unsupported table '{}' for coordinate conversion.",
+                    other
+                )),
+            )));
+        }
+    };
+
+    let select_sql = format!(
+        "SELECT {key}, X, Y, grid_unit FROM {table}",
+        key = key_column,
+        table = table_name
+    );
+
+    let mut stmt = tx.prepare(&select_sql)?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<f64>>(1)?,
+            row.get::<_, Option<f64>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+
+    let mut updates = Vec::new();
+
+    for row in rows {
+        let (key, x_opt, y_opt, grid_unit) = row?;
+        let unit = grid_unit.as_deref().unwrap_or("pc");
+
+        if unit == "pc"
+            && let (Some(x), Some(y)) = (x_opt, y_opt)
+        {
+            let (new_x, new_y) = crate::utils::normalize::convert_coordinates_raw(x, y, "ly")
+                .ok_or_else(|| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                        "Failed to convert coordinates",
+                    )))
+                })?;
+
+            updates.push((key, new_x, new_y));
+        }
+    }
+
+    let update_sql = format!(
+        "UPDATE {table}
+         SET X = ?1,
+             Y = ?2,
+             grid_unit = 'ly'
+         WHERE {key} = ?3",
+        table = table_name,
+        key = key_column
+    );
+
+    for (key, new_x, new_y) in updates {
+        tx.execute(&update_sql, rusqlite::params![new_x, new_y, key])?;
+    }
+
+    let update_unit_sql = format!(
+        "UPDATE {table}
+         SET grid_unit = 'ly'
+         WHERE grid_unit IS NULL OR grid_unit = 'pc'",
+        table = table_name
+    );
+
+    tx.execute(&update_unit_sql, [])?;
 
     Ok(())
 }
