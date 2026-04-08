@@ -2,6 +2,8 @@ use crate::utils::wiki::fandom_planet_url;
 use rusqlite::{Result as SqlResult, Row};
 use serde::{Deserialize, Serialize};
 
+pub const PC_TO_LY: f64 = 3.26156;
+
 #[derive(Debug)]
 pub struct Planet {
     pub fid: i64,

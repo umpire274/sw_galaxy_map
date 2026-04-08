@@ -4346,7 +4346,7 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_core"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "anyhow",
  "atty",

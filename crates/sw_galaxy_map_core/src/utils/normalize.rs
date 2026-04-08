@@ -2,6 +2,7 @@ use regex::Regex;
 use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
+use crate::model::PC_TO_LY;
 
 fn non_alnum_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -23,6 +24,19 @@ pub fn normalize_text(input: &str) -> String {
     let tmp = non_alnum_regex().replace_all(&no_diacritics, " ");
 
     spaces_regex().replace_all(tmp.trim(), " ").to_string()
+}
+
+/// Converts a coordinate pair to the requested unit.
+///
+/// Semantics:
+/// - "ly": input is interpreted as parsecs and converted to light years
+/// - "pc": input is interpreted as light years and converted to parsecs
+pub fn convert_coordinates_to(x: f64, y: f64, target_unit: &str) -> Option<(f64, f64)> {
+    match target_unit {
+        "ly" => Some((x * PC_TO_LY, y * PC_TO_LY)),
+        "pc" => Some((x / PC_TO_LY, y / PC_TO_LY)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
