@@ -25,7 +25,7 @@ categories = ["command-line-utilities", "visualization", "games"]
 anyhow = "1.0.102"
 arboard = "3.6.1"
 clap = { version = "4.6.0", features = ["derive"] }
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+rusqlite = { version = "0.39.0", features = ["bundled", "backup"] }
 unicode-normalization = "0.1.25"
 regex = "1.12.3"
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls", "json"] }

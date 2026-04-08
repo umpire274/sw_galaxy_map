@@ -1,16 +1,16 @@
-//! Database backup command.
-
 use anyhow::{Context, Result, bail};
 use chrono::Local;
+use rusqlite::{Connection, backup::Backup};
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use crate::cli::args::DbBackupArgs;
-use crate::cli::commands::db::utils::human_size;
 use sw_galaxy_map_core::db::db_status::resolve_db_path;
 
-/// Creates a physical backup copy of the current SQLite database.
+use crate::cli::args::DbBackupArgs;
+use crate::cli::commands::db::utils::human_size;
+
+/// Creates a consistent backup copy of the current SQLite database.
 pub fn run(db_override: Option<String>, args: &DbBackupArgs) -> Result<()> {
     let db_path = resolve_db_path(db_override)?;
 
@@ -26,7 +26,7 @@ pub fn run(db_override: Option<String>, args: &DbBackupArgs) -> Result<()> {
     println!();
 
     let dest_dir = match &args.output {
-        Some(path) => path.clone(),
+        Some(path) => PathBuf::from(path),
         None => prompt_destination_directory()?,
     };
 
@@ -46,15 +46,27 @@ pub fn run(db_override: Option<String>, args: &DbBackupArgs) -> Result<()> {
 
     let dest_file = dest_dir.join(backup_name);
 
-    fs::copy(&db_path, &dest_file).with_context(|| {
+    let src = Connection::open(&db_path)
+        .with_context(|| format!("Failed to open source database '{}'", db_path.display()))?;
+
+    let mut dst = Connection::open(&dest_file).with_context(|| {
         format!(
-            "Failed to copy database from '{}' to '{}'",
-            db_path.display(),
+            "Failed to create destination database '{}'",
             dest_file.display()
         )
     })?;
 
+    {
+        let backup = Backup::new(&src, &mut dst)
+            .with_context(|| "Failed to initialize SQLite backup".to_string())?;
+
+        backup
+            .step(-1)
+            .with_context(|| "SQLite backup step failed".to_string())?;
+    }
+
     let size = fs::metadata(&dest_file)?.len();
+
     println!("Backup created successfully.");
     println!("Size    : {}", human_size(size));
     println!("Saved to: {}", dest_file.display());
