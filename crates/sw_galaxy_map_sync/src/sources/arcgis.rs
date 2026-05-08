@@ -55,8 +55,8 @@ pub fn normalize_arcgis_feature(raw: Value) -> Result<ArcgisRecord> {
     let fid = get_i64(&raw, &["FID", "OBJECTID", "ObjectId", "objectid"])
         .context("ArcGIS feature has no FID/OBJECTID")?;
 
-    let planet = get_string(&raw, &["Planet", "PLANET", "Name", "NAME", "planet"])
-        .unwrap_or_default();
+    let planet =
+        get_string(&raw, &["Planet", "PLANET", "Name", "NAME", "planet"]).unwrap_or_default();
 
     let region = get_string(&raw, &["Region", "REGION", "region"]).unwrap_or_default();
     let sector = get_string(&raw, &["Sector", "SECTOR", "sector"]).unwrap_or_default();

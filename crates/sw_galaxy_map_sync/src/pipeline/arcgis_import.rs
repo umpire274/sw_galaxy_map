@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::db::sqlite::{ensure_required_schema, SqlitePlanetRepository};
+use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema};
 use crate::models::{ArcgisImportResult, UpsertOutcome};
 use crate::sources::arcgis::fetch_arcgis_dataset;
 
