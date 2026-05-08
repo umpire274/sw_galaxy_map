@@ -3,6 +3,7 @@ use crate::cli::{
     print_db_update_report, print_galaxy_stats, print_migration_report,
 };
 use crate::ui::{info, success};
+use std::path::PathBuf;
 use sw_galaxy_map_core::validate;
 
 pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Result<()> {
@@ -66,53 +67,47 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                 Ok(())
             }
 
-            args::DbCommands::Sync {
-                csv,
-                table,
-                delimiter,
-                dry_run,
-                mark_deleted,
-                report,
-            } => {
-                let csv_path = sw_galaxy_map_sync::resolve_csv_path(csv)?;
+            args::DbCommands::Sync { table, dry_run, .. } => {
+                const DEFAULT_ARCGIS_PAGE_SIZE: i64 = 2000;
+                const DEFAULT_UNKNOWN_TABLE: &str = "planets_unknown";
 
-                let delimiter_byte = delimiter
-                    .to_string()
-                    .as_bytes()
-                    .first()
-                    .copied()
-                    .ok_or_else(|| anyhow::anyhow!("Invalid delimiter"))?;
+                info("Running ArcGIS ingestion sync...");
 
-                let mut con = open_db_migrating(cli.db.clone())?;
+                let db_path = cli
+                    .db
+                    .clone()
+                    .map(PathBuf::from)
+                    .ok_or_else(|| anyhow::anyhow!("Database path is required"))?;
 
-                info(format!("Syncing from CSV: {}", csv_path.display()));
-
-                let opts = sw_galaxy_map_sync::SyncOptions {
-                    csv: csv_path,
-                    table: table.clone(),
-                    delimiter: delimiter_byte,
-                    dry_run: *dry_run,
-                    mark_deleted: *mark_deleted,
-                    report_path: report.clone(),
-                };
-
-                let result = sw_galaxy_map_sync::run_sync(&mut con, &opts)?;
+                let result = sw_galaxy_map_sync::pipeline::arcgis_import::import_arcgis_to_sqlite(
+                    &sw_galaxy_map_sync::pipeline::arcgis_import::ArcgisImportOptions {
+                        db: db_path,
+                        table: table.clone(),
+                        unknown_table: DEFAULT_UNKNOWN_TABLE.to_string(),
+                        page_size: DEFAULT_ARCGIS_PAGE_SIZE,
+                        dry_run: *dry_run,
+                    },
+                )?;
 
                 println!();
-                info("Sync summary:");
-                println!("  Inserted         : {}", result.stats.inserted);
-                println!("  Updated exact    : {}", result.stats.updated_exact);
-                println!("  Updated suffix   : {}", result.stats.updated_suffix);
-                println!("  Invalid CSV rows : {}", result.stats.invalid_csv_rows);
-                println!("  Marked invalid   : {}", result.stats.invalid_marked);
-                println!("  Skipped DB       : {}", result.stats.skipped_db);
-                println!("  Logically deleted: {}", result.stats.deleted_logically);
+                info("ArcGIS sync summary:");
+                println!("  Fetched          : {}", result.fetched);
+                println!("  Known records    : {}", result.known);
+                println!("  Unknown records  : {}", result.unknown);
+                println!("  Known inserted   : {}", result.inserted);
+                println!("  Known updated    : {}", result.updated);
+                println!("  Known skipped    : {}", result.skipped);
+                println!("  Unknown inserted : {}", result.unknown_inserted);
+                println!("  Unknown updated  : {}", result.unknown_updated);
+                println!("  Unknown skipped  : {}", result.unknown_skipped);
 
                 if !*dry_run {
+                    let mut con = open_db_migrating(cli.db.clone())?;
+
                     println!();
                     info("Rebuilding planet_search and FTS indexes...");
                     sw_galaxy_map_core::db::provision::rebuild_search_indexes(&mut con)?;
-                    success("Sync complete. Search indexes rebuilt.");
+                    success("ArcGIS sync complete. Search indexes rebuilt.");
                 } else {
                     success("Dry run complete. No changes written.");
                 }
