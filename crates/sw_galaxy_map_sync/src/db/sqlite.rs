@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::models::{NormalizedPlanet, UpsertOutcome};
+use crate::models::{
+    CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
+};
+use crate::utils::{build_planet_norm, cmp_key, same_overlay_fields, strip_roman_suffix};
 
-/// SQLite repository for ArcGIS planet imports.
+/// SQLite repository for planet synchronization/import operations.
 pub struct SqlitePlanetRepository<'conn> {
     conn: &'conn Connection,
     table: String,
@@ -20,59 +23,11 @@ impl<'conn> SqlitePlanetRepository<'conn> {
 
     /// Ensure that this repository table exists.
     pub fn ensure_table_exists(&self) -> Result<()> {
-        if !self.table_exists()? {
+        if !table_exists(self.conn, &self.table)? {
             bail!("Target table '{}' does not exist", self.table);
         }
 
         Ok(())
-    }
-
-    /// Create a table with the same column names/types as another table if missing.
-    ///
-    /// This is used for `planets_unknown`. We intentionally do not rely on
-    /// `ON CONFLICT`, so the cloned table does not need to preserve indexes
-    /// or primary-key constraints.
-    pub fn create_like_if_missing(
-        conn: &'conn Connection,
-        source_table: &str,
-        target_table: &str,
-    ) -> Result<Self> {
-        let repo = Self::new(conn, target_table);
-
-        if repo.table_exists()? {
-            return Ok(repo);
-        }
-
-        let columns = table_columns(conn, source_table)
-            .with_context(|| format!("Unable to inspect source table '{source_table}'"))?;
-
-        if columns.is_empty() {
-            bail!("Source table '{source_table}' does not exist or has no columns");
-        }
-
-        let column_sql = columns
-            .iter()
-            .map(|column| {
-                let ty = if column.ty.trim().is_empty() {
-                    "TEXT"
-                } else {
-                    column.ty.as_str()
-                };
-
-                format!("{} {}", quote_ident(&column.name), ty)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let sql = format!(
-            "CREATE TABLE IF NOT EXISTS {} ({})",
-            quote_ident(target_table),
-            column_sql
-        );
-
-        conn.execute(&sql, [])?;
-
-        Ok(repo)
     }
 
     /// Upsert a normalized ArcGIS planet into the target table.
@@ -86,26 +41,95 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         }
 
         if existing_hash.is_some() {
-            self.update_planet(planet)?;
+            self.update_arcgis_planet(planet)?;
             Ok(UpsertOutcome::Updated)
         } else {
-            self.insert_planet(planet)?;
+            self.insert_arcgis_planet(planet)?;
             Ok(UpsertOutcome::Inserted)
         }
     }
 
-    fn table_exists(&self) -> Result<bool> {
-        let exists = self
-            .conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
-                params![self.table],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some();
+    /// Apply one official CSV overlay row to the target table.
+    pub fn apply_csv_overlay_row(
+        &self,
+        row: &CsvOverlayRow,
+        dry_run: bool,
+    ) -> Result<CsvOverlayOutcome> {
+        if let Some(existing) = self.find_exact_match(row)? {
+            return self.apply_csv_match(existing, row, dry_run, false);
+        }
 
-        Ok(exists)
+        if let Some(existing) = self.find_suffix_match(row)? {
+            return self.apply_csv_match(existing, row, dry_run, true);
+        }
+
+        if !dry_run {
+            self.insert_csv_overlay_row(row)?;
+        }
+
+        Ok(CsvOverlayOutcome::Inserted)
+    }
+
+    /// Mark records not represented by the CSV overlay as deleted/skipped.
+    pub fn mark_deleted_not_in_csv(
+        &self,
+        csv_rows: &[CsvOverlayRow],
+        dry_run: bool,
+    ) -> Result<(usize, usize)> {
+        let db_rows = self.load_planet_rows()?;
+        let mut deleted = 0usize;
+        let mut skipped = 0usize;
+
+        for db_row in db_rows {
+            if exists_in_csv(&db_row, csv_rows) {
+                if db_row.status.trim().is_empty() {
+                    skipped += 1;
+                    if !dry_run {
+                        self.set_status(db_row.fid, "skipped")?;
+                    }
+                }
+            } else {
+                deleted += 1;
+                if !dry_run {
+                    self.set_status(db_row.fid, "deleted")?;
+                }
+            }
+        }
+
+        Ok((deleted, skipped))
+    }
+
+    fn apply_csv_match(
+        &self,
+        existing: PlanetDbRow,
+        row: &CsvOverlayRow,
+        dry_run: bool,
+        suffix_match: bool,
+    ) -> Result<CsvOverlayOutcome> {
+        if same_overlay_fields(
+            &existing.sector,
+            &existing.region,
+            &existing.grid,
+            &row.sector,
+            &row.region,
+            &row.grid,
+        ) {
+            if !dry_run {
+                self.set_status(existing.fid, "active")?;
+            }
+
+            Ok(CsvOverlayOutcome::Active)
+        } else {
+            if !dry_run {
+                self.update_csv_overlay_row(existing.fid, row, "modified")?;
+            }
+
+            Ok(if suffix_match {
+                CsvOverlayOutcome::ModifiedSuffix
+            } else {
+                CsvOverlayOutcome::ModifiedExact
+            })
+        }
     }
 
     fn find_existing_arcgis_hash_by_fid(&self, fid: i64) -> Result<Option<String>> {
@@ -121,7 +145,59 @@ impl<'conn> SqlitePlanetRepository<'conn> {
             .map_err(Into::into)
     }
 
-    fn insert_planet(&self, planet: &NormalizedPlanet) -> Result<()> {
+    fn find_exact_match(&self, row: &CsvOverlayRow) -> Result<Option<PlanetDbRow>> {
+        let target = cmp_key(&row.system);
+        let rows = self.load_planet_rows()?;
+
+        Ok(rows
+            .into_iter()
+            .find(|db_row| cmp_key(&db_row.planet) == target))
+    }
+
+    fn find_suffix_match(&self, row: &CsvOverlayRow) -> Result<Option<PlanetDbRow>> {
+        let target = cmp_key(&row.system);
+        let target_base = strip_roman_suffix(&target);
+        let rows = self.load_planet_rows()?;
+
+        Ok(rows.into_iter().find(|db_row| {
+            let db_key = cmp_key(&db_row.planet);
+            let db_base = strip_roman_suffix(&db_key);
+
+            db_base == target || db_key == target_base || db_base == target_base
+        }))
+    }
+
+    fn load_planet_rows(&self) -> Result<Vec<PlanetDbRow>> {
+        let sql = format!(
+            "SELECT FID,
+                    COALESCE(Planet, ''),
+                    COALESCE(Sector, ''),
+                    COALESCE(Region, ''),
+                    COALESCE(Grid, ''),
+                    COALESCE(status, '')
+             FROM {}
+             WHERE COALESCE(deleted, 0) = 0",
+            quote_ident(&self.table)
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(PlanetDbRow {
+                    fid: row.get(0)?,
+                    planet: row.get(1)?,
+                    sector: row.get(2)?,
+                    region: row.get(3)?,
+                    grid: row.get(4)?,
+                    status: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(rows)
+    }
+
+    fn insert_arcgis_planet(&self, planet: &NormalizedPlanet) -> Result<()> {
         let sql = format!(
             "INSERT INTO {}
                 (FID, Planet, planet_norm, Region, Sector, System, Grid, X, Y,
@@ -152,7 +228,7 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         Ok(())
     }
 
-    fn update_planet(&self, planet: &NormalizedPlanet) -> Result<()> {
+    fn update_arcgis_planet(&self, planet: &NormalizedPlanet) -> Result<()> {
         let sql = format!(
             "UPDATE {}
              SET
@@ -192,45 +268,96 @@ impl<'conn> SqlitePlanetRepository<'conn> {
 
         Ok(())
     }
-}
 
-#[derive(Debug)]
-struct TableColumn {
-    name: String,
-    ty: String,
-}
+    fn insert_csv_overlay_row(&self, row: &CsvOverlayRow) -> Result<()> {
+        let fid = self.next_fid()?;
+        let planet_norm = build_planet_norm(&row.system);
+        let sql = format!(
+            "INSERT INTO {}
+                (FID, Planet, planet_norm, Region, Sector, System, Grid,
+                 X, Y, arcgis_hash, deleted, Canon, Legends, status)
+             VALUES
+                (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                 ?8, ?9, '', 0, 1, 0, 'inserted')",
+            quote_ident(&self.table)
+        );
 
-fn table_columns(conn: &Connection, table: &str) -> Result<Vec<TableColumn>> {
-    let sql = format!("PRAGMA table_info({})", quote_ident(table));
-    let mut stmt = conn.prepare(&sql)?;
+        self.conn.execute(
+            &sql,
+            params![
+                fid,
+                row.system,
+                planet_norm,
+                row.region,
+                row.sector,
+                row.system,
+                row.grid,
+                0.0_f64,
+                0.0_f64,
+            ],
+        )?;
 
-    let columns = stmt
-        .query_map([], |row| {
-            Ok(TableColumn {
-                name: row.get(1)?,
-                ty: row.get(2)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(())
+    }
 
-    Ok(columns)
-}
+    fn update_csv_overlay_row(&self, fid: i64, row: &CsvOverlayRow, status: &str) -> Result<()> {
+        let planet_norm = build_planet_norm(&row.system);
+        let sql = format!(
+            "UPDATE {}
+             SET
+                Planet = ?2,
+                planet_norm = ?3,
+                Region = ?4,
+                Sector = ?5,
+                System = ?6,
+                Grid = ?7,
+                deleted = 0,
+                status = ?8
+             WHERE FID = ?1",
+            quote_ident(&self.table)
+        );
 
-fn quote_ident(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
-}
+        self.conn.execute(
+            &sql,
+            params![
+                fid,
+                row.system,
+                planet_norm,
+                row.region,
+                row.sector,
+                row.system,
+                row.grid,
+                status,
+            ],
+        )?;
 
-fn round3(value: f64) -> f64 {
-    (value * 1000.0).round() / 1000.0
+        Ok(())
+    }
+
+    fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+        let sql = format!(
+            "UPDATE {} SET status = ?2, deleted = 0 WHERE FID = ?1",
+            quote_ident(&self.table)
+        );
+
+        self.conn.execute(&sql, params![fid, status])?;
+
+        Ok(())
+    }
+
+    fn next_fid(&self) -> Result<i64> {
+        let sql = format!(
+            "SELECT COALESCE(MAX(FID), 0) + 1 FROM {}",
+            quote_ident(&self.table)
+        );
+
+        self.conn
+            .query_row(&sql, [], |row| row.get(0))
+            .map_err(Into::into)
+    }
 }
 
 /// Ensures that the required sync tables exist without destroying existing data.
-///
-/// If the main `planets` table is missing, the database is considered
-/// uninitialized and the canonical core schema is created.
-///
-/// If only `planets_unknown` is missing, only that table is created by cloning
-/// the column layout from `planets`.
 pub fn ensure_required_schema(
     conn: &Connection,
     planets_table: &str,
@@ -276,9 +403,6 @@ pub fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
 
 /// Creates `target_table` with the same column names and SQLite column types
 /// as `source_table`.
-///
-/// This intentionally does not copy indexes, triggers, constraints or FTS
-/// objects. It is used only for `planets_unknown`.
 pub fn create_table_like(conn: &Connection, source_table: &str, target_table: &str) -> Result<()> {
     if table_exists(conn, target_table)? {
         return Ok(());
@@ -314,4 +438,53 @@ pub fn create_table_like(conn: &Connection, source_table: &str, target_table: &s
     conn.execute(&sql, [])?;
 
     Ok(())
+}
+
+fn exists_in_csv(db_row: &PlanetDbRow, csv_rows: &[CsvOverlayRow]) -> bool {
+    let db_name = cmp_key(&db_row.planet);
+    let db_base = strip_roman_suffix(&db_name);
+
+    csv_rows.iter().any(|row| {
+        let csv_name = cmp_key(&row.system);
+        let csv_base = strip_roman_suffix(&csv_name);
+
+        db_name == csv_name
+            || db_base == csv_name
+            || db_name == csv_base
+            || db_base == csv_base
+            || (cmp_key(&db_row.sector) == cmp_key(&row.sector)
+                && cmp_key(&db_row.region) == cmp_key(&row.region)
+                && cmp_key(&db_row.grid) == cmp_key(&row.grid))
+    })
+}
+
+#[derive(Debug)]
+struct TableColumn {
+    name: String,
+    ty: String,
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<TableColumn>> {
+    let sql = format!("PRAGMA table_info({})", quote_ident(table));
+    let mut stmt = conn.prepare(&sql)?;
+
+    let columns = stmt
+        .query_map([], |row| {
+            Ok(TableColumn {
+                name: row.get(1)?,
+                ty: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(columns)
+}
+
+fn quote_ident(value: &str) -> String {
+    let escaped = value.replace('"', "\"\"");
+    format!("\"{escaped}\"")
+}
+
+fn round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
 }

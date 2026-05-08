@@ -86,3 +86,69 @@ pub enum UpsertOutcome {
     Updated,
     Skipped,
 }
+
+/// Supported CSV overlay input formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CsvOverlayFormat {
+    /// Auto-detect the format from CSV headers.
+    Auto,
+    /// Official Disney-style curated CSV: system;sector;region;grid.
+    Official,
+    /// Full ArcGIS/export CSV containing the planets table columns.
+    Full,
+}
+
+impl std::str::FromStr for CsvOverlayFormat {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "official" => Ok(Self::Official),
+            "full" => Ok(Self::Full),
+            other => anyhow::bail!("Unsupported CSV overlay format: {other}"),
+        }
+    }
+}
+
+/// One normalized row read from a CSV overlay source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsvOverlayRow {
+    pub system: String,
+    pub sector: String,
+    pub region: String,
+    pub grid: String,
+}
+
+/// One database row used by the CSV overlay matching phase.
+#[derive(Debug, Clone)]
+pub struct PlanetDbRow {
+    pub fid: i64,
+    pub planet: String,
+    pub sector: String,
+    pub region: String,
+    pub grid: String,
+    pub status: String,
+}
+
+/// Result classification for a single CSV overlay row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CsvOverlayOutcome {
+    Inserted,
+    Active,
+    ModifiedExact,
+    ModifiedSuffix,
+}
+
+/// Aggregate statistics produced by the CSV overlay pipeline.
+#[derive(Debug, Clone, Default)]
+pub struct CsvOverlayStats {
+    pub rows_read: usize,
+    pub inserted: usize,
+    pub active: usize,
+    pub modified_exact: usize,
+    pub modified_suffix: usize,
+    pub deleted: usize,
+    pub skipped: usize,
+    pub dry_run: bool,
+}
