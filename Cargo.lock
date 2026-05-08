@@ -1596,7 +1596,6 @@ checksum = "b375d6465b98090a5f25b1c7703f3859783755aa9a80433b36e0379a3ec2f369"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
- "zlib-rs",
 ]
 
 [[package]]
@@ -3862,15 +3861,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust_xlsxwriter"
-version = "0.94.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efc4a0f1f7b425669996977016152b2939be9be44d40df252a5051c9c6b3b859"
-dependencies = [
- "zip",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4397,16 +4387,17 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_sync"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
- "csv",
  "indicatif",
  "regex",
+ "reqwest",
  "rusqlite",
- "rust_xlsxwriter",
  "serde",
+ "serde_json",
+ "sw_galaxy_map_core",
 ]
 
 [[package]]
@@ -4830,12 +4821,6 @@ checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
 dependencies = [
  "rustc-hash 2.1.1",
 ]
-
-[[package]]
-name = "typed-path"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typenum"
@@ -6362,42 +6347,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "zip"
-version = "7.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42e33efc22a0650c311c2ef19115ce232583abbe80850bc8b66509ebef02de0"
-dependencies = [
- "crc32fast",
- "flate2",
- "indexmap",
- "memchr",
- "typed-path",
- "zopfli",
-]
-
-[[package]]
-name = "zlib-rs"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40990edd51aae2c2b6907af74ffb635029d5788228222c4bb811e9351c0caad3"
-
-[[package]]
 name = "zmij"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zune-core"
