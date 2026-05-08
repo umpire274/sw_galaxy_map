@@ -1,23 +1,18 @@
 # sw_galaxy_map_sync
 
-ArcGIS-first synchronization and ingestion tool for the `sw_galaxy_map` workspace and the future Astronavis data pipeline.
+ArcGIS-first synchronization and ingestion tool for the `sw_galaxy_map` workspace and the future Astronavis™ data
+pipeline.
 
-Version `0.3.0` resets the crate around a cleaner architecture:
+`sw_galaxy_map_sync` is responsible for:
 
-```text
-sw_galaxy_map_sync = orchestration CLI
-sw_galaxy_map_core = ArcGIS source/provider logic
-```
-
-The crate does not duplicate ArcGIS logic. It reuses the already working provider from:
-
-```rust
-sw_galaxy_map_core::provision::arcgis
-```
+* importing and normalizing ArcGIS data,
+* preserving unnamed ArcGIS records,
+* synchronizing curated official CSV overlays,
+* maintaining the SQLite baseline used by the CLI, GUI and future API layers.
 
 ---
 
-## Architecture
+# Architecture
 
 ```text
 ArcGIS FeatureServer
@@ -26,36 +21,117 @@ ArcGIS FeatureServer
 sw_galaxy_map_core::provision::arcgis
         │
         ▼
-sw_galaxy_map_sync source adapter
+sw_galaxy_map_sync
         │
-        ▼
-ArcGIS classifier
-   ├── known planets   → planets
-   └── unnamed records → planets_unknown
+        ├── ArcGIS baseline import
+        │       ├── planets
+        │       └── planets_unknown
+        │
+        └── Curated CSV overlay
+                └── planets.status
+```
+
+The crate intentionally reuses the ArcGIS provider already implemented in:
+
+```rust
+sw_galaxy_map_core::provision::arcgis
+```
+
+This avoids duplicated source logic and keeps ArcGIS handling centralized inside the core crate.
+
+---
+
+# Data Philosophy
+
+The synchronization pipeline is intentionally split into two layers.
+
+## 1. ArcGIS Baseline
+
+ArcGIS is treated as the canonical coordinate and source-data baseline.
+
+This layer provides:
+
+* stable FID identifiers,
+* X/Y coordinates,
+* raw source metadata,
+* unknown or unnamed records,
+* normalized ArcGIS ingestion.
+
+## 2. Curated Official CSV Overlay
+
+The curated CSV overlay is treated as the canonical naming and metadata validation layer.
+
+This layer provides:
+
+* official naming validation,
+* curated Region/Sector/Grid corrections,
+* status tracking,
+* logical deletion handling,
+* curated-only systems missing from ArcGIS.
+
+This design allows Astronavis™ to preserve:
+
+* stable coordinates,
+* curated naming,
+* historical ArcGIS data,
+* unknown records,
+* future manual corrections.
+
+---
+
+# Current Features
+
+## ArcGIS Pipeline
+
+* Download planet records from ArcGIS.
+* Normalize ArcGIS attributes into stable internal models.
+* Export normalized ArcGIS data to JSON.
+* Split ArcGIS records into:
+
+    * known planets,
+    * unnamed/unknown records.
+* Import/upsert known records into `planets`.
+* Import/upsert unnamed records into `planets_unknown`.
+* Auto-create `planets_unknown` when missing.
+* Preserve unknown ArcGIS source records.
+* Stable FID + hash upsert logic.
+* `--dry-run` support.
+
+## CSV Overlay Pipeline
+
+* Import curated Disney/official CSV overlays.
+* Support semicolon-separated official CSV files.
+* Support full planets/export CSV files.
+* Exact planet-name matching.
+* Roman suffix/base-name fallback matching.
+* Curated-only row insertion.
+* Overlay status tracking.
+* Logical deletion support.
+* Dry-run overlay validation.
+
+---
+
+# Coordinate Policy
+
+ArcGIS X/Y values are currently treated as the canonical stored coordinates.
+
+Coordinates are currently stored as parsecs.
+
+Values are rounded to 3 decimal places before insertion/update.
+
+Recommended long-term policy:
+
+```text
+DB canonical coordinates: parsec
+UI/export coordinates   : light years
+conversion              : ly = pc * 3.26156
 ```
 
 ---
 
-## Current Features
+# Unknown ArcGIS Records
 
-- Download planet records from ArcGIS.
-- Normalize ArcGIS attributes into a stable internal model.
-- Export normalized ArcGIS data to JSON.
-- Split ArcGIS records into:
-  - known planets,
-  - unknown unnamed ArcGIS records.
-- Import/upsert known records into `planets`.
-- Import/upsert unnamed records into `planets_unknown`.
-- Auto-create `planets_unknown` from the `planets` column layout when missing.
-- Support `--dry-run` for safe validation.
-- Keep SQLite handled through `rusqlite`.
-- Avoid `sqlx` for now to prevent workspace-level `libsqlite3-sys` conflicts.
-
----
-
-## Unknown ArcGIS Records
-
-ArcGIS sometimes contains records without a usable planet name.
+ArcGIS sometimes exposes records without a usable planet name.
 
 These records are not discarded.
 
@@ -65,62 +141,73 @@ Instead, they are preserved in:
 planets_unknown
 ```
 
-The `planets_unknown` table is created automatically if missing, using the same column names and SQLite column types as the configured `planets` table.
-
 Records are stored with:
 
-- original ArcGIS `FID`,
-- empty `Planet`,
-- empty `planet_norm`,
-- available region/sector/system/grid data,
-- available X/Y coordinates,
-- ArcGIS hash,
-- source flags.
+* original ArcGIS `FID`,
+* original source metadata,
+* available coordinates,
+* ArcGIS source hash,
+* canonical/legends flags.
 
-This allows later inspection, review and promotion without losing source data.
+This allows later:
+
+* inspection,
+* promotion,
+* manual correction,
+* future coordinate reconciliation.
 
 ---
 
-## Coordinate Policy
+# Quick Start
 
-ArcGIS X/Y values are currently treated as the canonical stored coordinates.
+## 1. Import ArcGIS baseline
 
-At this stage they are stored as parsecs, matching the ArcGIS source.
+```bash
+cargo run -p sw_galaxy_map_sync -- arcgis import \
+  --db res/sw_planets.sqlite
+```
 
-Values are rounded to 3 decimal places before DB insertion/update.
+## 2. Overlay official CSV
 
-Recommended long-term policy:
-
-```text
-DB canonical coordinates: parsec
-UI/export coordinates   : light years, when needed
-conversion              : ly = pc * 3.26156
+```bash
+cargo run -p sw_galaxy_map_sync -- csv overlay \
+  --db res/sw_planets.sqlite \
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv
 ```
 
 ---
 
-## Commands
+# Commands
 
-### Show help
+## Show help
 
 ```bash
 cargo run -p sw_galaxy_map_sync -- --help
 ```
 
-### Show ArcGIS commands
+## ArcGIS commands
 
 ```bash
 cargo run -p sw_galaxy_map_sync -- arcgis --help
 ```
 
----
-
-## ArcGIS: Fetch
-
-Download ArcGIS data and save normalized records as JSON.
+## CSV overlay commands
 
 ```bash
-cargo run -p sw_galaxy_map_sync -- arcgis fetch --out res/arcgis_planets.json
+cargo run -p sw_galaxy_map_sync -- csv --help
+```
+
+---
+
+# ArcGIS Commands
+
+## Fetch ArcGIS JSON
+
+Download ArcGIS data and export normalized records as JSON.
+
+```bash
+cargo run -p sw_galaxy_map_sync -- arcgis fetch \
+  --out res/arcgis_planets.json
 ```
 
 Optional page size:
@@ -131,7 +218,7 @@ cargo run -p sw_galaxy_map_sync -- arcgis fetch \
   --out res/arcgis_planets.json
 ```
 
-Output format:
+Generated JSON format:
 
 ```json
 {
@@ -146,10 +233,7 @@ Output format:
       "grid": "G-7",
       "x": 0.0,
       "y": 0.0,
-      "arcgis_hash": "...",
-      "canon": 1,
-      "legends": 0,
-      "raw": {}
+      "arcgis_hash": "..."
     }
   ],
   "unknown": [
@@ -163,10 +247,7 @@ Output format:
       "grid": "...",
       "x": 0.0,
       "y": 0.0,
-      "arcgis_hash": "...",
-      "canon": 1,
-      "legends": 0,
-      "raw": {}
+      "arcgis_hash": "..."
     }
   ]
 }
@@ -174,16 +255,14 @@ Output format:
 
 ---
 
-## ArcGIS: Import into SQLite
-
-Download from ArcGIS and upsert into SQLite:
+## Import ArcGIS into SQLite
 
 ```bash
 cargo run -p sw_galaxy_map_sync -- arcgis import \
   --db res/sw_planets.sqlite
 ```
 
-Use custom tables:
+Custom tables:
 
 ```bash
 cargo run -p sw_galaxy_map_sync -- arcgis import \
@@ -202,12 +281,140 @@ cargo run -p sw_galaxy_map_sync -- arcgis import \
 
 ---
 
-## SQLite Expectations
+# CSV Overlay Pipeline
 
-The import command expects a `planets`-like table with at least these columns:
+Version `0.3.1` introduces curated CSV overlays on top of the ArcGIS baseline.
+
+Workflow:
+
+```text
+1. ArcGIS import
+   ArcGIS → planets / planets_unknown
+
+2. CSV overlay
+   official CSV → planets status/update layer
+```
+
+---
+
+# Supported CSV Formats
+
+## Official semicolon CSV
+
+Curated Disney/current official list format:
+
+```csv
+system;sector;region;grid
+Adelphi;Kibilini;Outer Rim Territories;P-17
+23 Mere;;Colonies;M-13
+```
+
+Default delimiter:
+
+```text
+;
+```
+
+---
+
+## Full planets/export CSV
+
+Full table/export-style format:
+
+```csv
+FID,Planet,planet_norm,Region,Sector,System,Grid,X,Y,arcgis_hash,deleted,Canon,Legends,...
+```
+
+Default delimiter:
+
+```text
+,
+```
+
+---
+
+# CSV Overlay Commands
+
+## Dry run
+
+```bash
+cargo run -p sw_galaxy_map_sync -- csv overlay \
+  --db res/sw_planets_overlay_test.sqlite \
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv \
+  --format official \
+  --delimiter ";" \
+  --dry-run
+```
+
+## Real overlay
+
+```bash
+cargo run -p sw_galaxy_map_sync -- csv overlay \
+  --db res/sw_planets_overlay_test.sqlite \
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv \
+  --format official \
+  --delimiter ";"
+```
+
+## Mark deleted
+
+```bash
+cargo run -p sw_galaxy_map_sync -- csv overlay \
+  --db res/sw_planets_overlay_test.sqlite \
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv \
+  --format official \
+  --delimiter ";" \
+  --mark-deleted
+```
+
+## Auto-detection mode
+
+```bash
+cargo run -p sw_galaxy_map_sync -- csv overlay \
+  --db res/sw_planets_overlay_test.sqlite \
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv
+```
+
+---
+
+# Overlay Matching Logic
+
+For every CSV row, the overlay pipeline attempts:
+
+1. exact planet match,
+2. Roman suffix/base-name fallback match,
+3. curated-only insertion when no match exists.
+
+Examples:
+
+```text
+Yavin      ↔ Yavin IV
+Yavin IV   ↔ Yavin
+```
+
+---
+
+# Overlay Status Values
+
+The overlay updates the `status` column using:
+
+| Status     | Meaning                                                         |
+|------------|-----------------------------------------------------------------|
+| `active`   | CSV row matches the existing DB metadata                        |
+| `modified` | CSV row updated metadata for an existing DB row                 |
+| `inserted` | CSV row was inserted as a curated-only row                      |
+| `deleted`  | DB row is not represented in the CSV overlay                    |
+| `skipped`  | Row was represented logically but required no status transition |
+
+---
+
+# SQLite Expectations
+
+The pipeline expects a `planets`-like table containing at least:
 
 ```sql
-FID INTEGER,
+FID
+INTEGER,
 Planet TEXT,
 planet_norm TEXT,
 Region TEXT,
@@ -219,111 +426,131 @@ Y REAL,
 arcgis_hash TEXT,
 deleted INTEGER,
 Canon INTEGER,
-Legends INTEGER
+Legends INTEGER,
+status TEXT
 ```
 
-The upsert is based on `FID`.
-
-The implementation intentionally uses manual `SELECT` + `INSERT`/`UPDATE` instead of `ON CONFLICT`, so `planets_unknown` does not require a primary-key constraint.
-
----
-
-## Why MySQL is not included yet
-
-MySQL is part of the future Astronavis direction, but version `0.3.0` intentionally avoids adding `sqlx`.
-
-Reason:
-
-- the workspace already uses `rusqlite`,
-- enabling `sqlx/sqlite` can pull another incompatible `libsqlite3-sys`,
-- the sync model must be stabilized before adding remote DB backends.
-
-Recommended roadmap:
+The upsert logic is based on:
 
 ```text
-v0.3.0  ArcGIS-first SQLite ingestion
-v0.3.x  CSV merge on top of ArcGIS baseline
+FID + arcgis_hash
+```
+
+The implementation intentionally avoids `ON CONFLICT` to keep compatibility with:
+
+```text
+planets_unknown
+```
+
+without requiring PK constraints.
+
+---
+
+# Why sqlx/MySQL is not included yet
+
+MySQL is part of the long-term Astronavis™ roadmap, but `v0.3.x` intentionally avoids adding `sqlx`.
+
+Reasons:
+
+* the workspace already standardizes on `rusqlite`,
+* `sqlx/sqlite` can introduce `libsqlite3-sys` conflicts,
+* the synchronization model must stabilize first.
+
+Planned roadmap:
+
+```text
+v0.3.0  ArcGIS-first ingestion
+v0.3.1  Curated CSV overlay pipeline
 v0.4.0  Repository abstraction
 v0.5.0  MySQL backend
+v0.6.0  Astronavis API integration
 ```
 
 ---
 
-## Suggested Tests
+# Suggested Tests
 
-### 1. Build
+## Build
 
 ```bash
 cargo build -p sw_galaxy_map_sync
 ```
 
-### 2. Format
+## Format
 
 ```bash
 cargo fmt --all -- --check
 ```
 
-### 3. Clippy
+## Clippy
 
 ```bash
 cargo clippy -p sw_galaxy_map_sync --all-targets --all-features -- -D warnings
 ```
 
-### 4. Unit tests
+## Unit tests
 
 ```bash
 cargo test -p sw_galaxy_map_sync
 ```
 
-### 5. Fetch ArcGIS JSON
+---
 
-```bash
-cargo run -p sw_galaxy_map_sync -- arcgis fetch --out res/arcgis_planets.json
-```
-
-Verify:
-
-- the JSON file exists,
-- it contains `known` and `unknown` arrays,
-- unnamed ArcGIS records are in `unknown`.
-
-### 6. Dry-run import
-
-```bash
-cargo run -p sw_galaxy_map_sync -- arcgis import --db res/sw_planets.sqlite --dry-run
-```
-
-Expected behavior:
-
-- fetches ArcGIS data,
-- normalizes records,
-- prints known/unknown statistics,
-- does not modify the DB.
-
-### 7. Real import on a copy
+# Recommended End-to-End Test
 
 ```powershell
-Copy-Item .\res\sw_planets.sqlite .\res\sw_planets_arcgis_test.sqlite
+Remove-Item .\res\sw_planets_overlay_test.sqlite -ErrorAction SilentlyContinue
 
 cargo run -p sw_galaxy_map_sync -- arcgis import `
-  --db res/sw_planets_arcgis_test.sqlite
+  --db res/sw_planets_overlay_test.sqlite
+
+cargo run -p sw_galaxy_map_sync -- csv overlay `
+  --db res/sw_planets_overlay_test.sqlite `
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv `
+  --format official `
+  --delimiter ";" `
+  --dry-run
+
+cargo run -p sw_galaxy_map_sync -- csv overlay `
+  --db res/sw_planets_overlay_test.sqlite `
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv `
+  --format official `
+  --delimiter ";"
+
+cargo run -p sw_galaxy_map_sync -- csv overlay `
+  --db res/sw_planets_overlay_test.sqlite `
+  --csv res/star_wars_galaxy_systems_official_semicolon.csv `
+  --format official `
+  --delimiter ";" `
+  --mark-deleted
 ```
 
-Verify:
+Expected overlay summary:
 
-- known records are inserted/updated in `planets`,
-- unnamed records are inserted/updated in `planets_unknown`,
-- `planets_unknown` is created if missing,
-- `arcgis_hash` changes only when source data changes,
-- `deleted = 0` for imported records.
+```text
+Rows read
+Inserted
+Active
+Modified
+Deleted
+Skipped
+Dry run
+```
 
 ---
 
-## License
+# License
 
 Licensed under either:
 
-- MIT License
-- Apache License 2.0
+* MIT License
+* Apache License 2.0
 
 at your option.
+
+---
+
+# Branding Notice
+
+Astronavis™ branding assets, logos, icons, wallpapers and visual identity materials are not covered by the open-source
+licenses and remain pro

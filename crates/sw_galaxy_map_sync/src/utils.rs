@@ -21,6 +21,51 @@ pub fn hash_source(value: &serde_json::Value) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Build a comparison key for CSV overlay matching.
+pub fn cmp_key(value: &str) -> String {
+    normalize_text(value)
+        .to_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
+/// Remove a trailing Roman numeral suffix from a normalized comparison key.
+///
+/// This helps matching rows such as `Yavin` against DB records like `Yavin IV`.
+pub fn strip_roman_suffix(value: &str) -> String {
+    const ROMAN_SUFFIXES: &[&str] = &[
+        "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv",
+        "xv", "xvi", "xvii", "xviii", "xix", "xx",
+    ];
+
+    for suffix in ROMAN_SUFFIXES.iter().rev() {
+        if value.len() > suffix.len() && value.ends_with(suffix) {
+            let prefix = &value[..value.len() - suffix.len()];
+            if !prefix.is_empty() {
+                return prefix.to_string();
+            }
+        }
+    }
+
+    value.to_string()
+}
+
+/// Returns true when a database row and a CSV overlay row contain identical
+/// curated metadata.
+pub fn same_overlay_fields(
+    db_sector: &str,
+    db_region: &str,
+    db_grid: &str,
+    csv_sector: &str,
+    csv_region: &str,
+    csv_grid: &str,
+) -> bool {
+    normalize_text(db_sector) == normalize_text(csv_sector)
+        && normalize_text(db_region) == normalize_text(csv_region)
+        && normalize_text(db_grid) == normalize_text(csv_grid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
