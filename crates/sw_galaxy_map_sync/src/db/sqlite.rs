@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use anyhow::{bail, Context, Result};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{NormalizedPlanet, UpsertOutcome};
 
@@ -224,10 +224,13 @@ fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
-/// Ensures that the required sync tables exist.
+/// Ensures that the required sync tables exist without destroying existing data.
 ///
-/// If either `planets` or `planets_unknown` is missing, the canonical schema
-/// from `sw_galaxy_map_core` is created.
+/// If the main `planets` table is missing, the database is considered
+/// uninitialized and the canonical core schema is created.
+///
+/// If only `planets_unknown` is missing, only that table is created by cloning
+/// the column layout from `planets`.
 pub fn ensure_required_schema(
     conn: &Connection,
     planets_table: &str,
@@ -236,14 +239,25 @@ pub fn ensure_required_schema(
     let has_planets = table_exists(conn, planets_table)?;
     let has_unknown = table_exists(conn, unknown_table)?;
 
-    if has_planets && has_unknown {
-        return Ok(());
+    match (has_planets, has_unknown) {
+        (true, true) => Ok(()),
+
+        (false, _) => {
+            let enable_fts = sw_galaxy_map_core::db::provision::has_fts5(conn);
+            sw_galaxy_map_core::db::provision::create_schema(conn, enable_fts)?;
+
+            if !table_exists(conn, unknown_table)? {
+                create_table_like(conn, planets_table, unknown_table)?;
+            }
+
+            Ok(())
+        }
+
+        (true, false) => {
+            create_table_like(conn, planets_table, unknown_table)?;
+            Ok(())
+        }
     }
-
-    let enable_fts = sw_galaxy_map_core::db::provision::has_fts5(conn);
-    sw_galaxy_map_core::db::provision::create_schema(conn, enable_fts)?;
-
-    Ok(())
 }
 
 /// Returns true when a SQLite table exists.
@@ -258,4 +272,46 @@ pub fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
         .is_some();
 
     Ok(exists)
+}
+
+/// Creates `target_table` with the same column names and SQLite column types
+/// as `source_table`.
+///
+/// This intentionally does not copy indexes, triggers, constraints or FTS
+/// objects. It is used only for `planets_unknown`.
+pub fn create_table_like(conn: &Connection, source_table: &str, target_table: &str) -> Result<()> {
+    if table_exists(conn, target_table)? {
+        return Ok(());
+    }
+
+    let columns = table_columns(conn, source_table)
+        .with_context(|| format!("Unable to inspect source table '{source_table}'"))?;
+
+    if columns.is_empty() {
+        bail!("Source table '{source_table}' does not exist or has no columns");
+    }
+
+    let column_sql = columns
+        .iter()
+        .map(|column| {
+            let ty = if column.ty.trim().is_empty() {
+                "TEXT"
+            } else {
+                column.ty.as_str()
+            };
+
+            format!("{} {}", quote_ident(&column.name), ty)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "CREATE TABLE IF NOT EXISTS {} ({})",
+        quote_ident(target_table),
+        column_sql
+    );
+
+    conn.execute(&sql, [])?;
+
+    Ok(())
 }

@@ -29,5 +29,10 @@ pnpm-debug.log*
 *.pfx
 *.der
 *.json
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.sqlite
+*.db
 
 !sync_report.xlsx
