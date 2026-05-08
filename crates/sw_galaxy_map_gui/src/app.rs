@@ -209,38 +209,33 @@ impl NavicomputerApp {
                 validate::validate_search(&filter)?;
             }
 
-            "route" => {
-                // route compute <from> <to> [<via>...], route show <id>, route explain <id>...
-                if tokens.len() >= 2 {
-                    match tokens[1].as_str() {
-                        "compute" => {
-                            let mut planets = Vec::new();
-                            for token in tokens.iter().skip(2) {
-                                if token.starts_with('-') {
-                                    break;
-                                }
-                                planets.push(token.clone());
-                            }
-                            validate::validate_route_planets(&planets)?;
+            "route" if tokens.len() >= 2 => match tokens[1].as_str() {
+                "compute" => {
+                    let mut planets = Vec::new();
+                    for token in tokens.iter().skip(2) {
+                        if token.starts_with('-') {
+                            break;
                         }
-                        "show" => {
-                            let id = tokens
-                                .get(2)
-                                .and_then(|s| s.parse::<i64>().ok())
-                                .unwrap_or(0);
-                            validate::validate_route_id(id, "show")?;
-                        }
-                        "explain" => {
-                            let id = tokens
-                                .get(2)
-                                .and_then(|s| s.parse::<i64>().ok())
-                                .unwrap_or(0);
-                            validate::validate_route_id(id, "explain")?;
-                        }
-                        _ => {}
+                        planets.push(token.clone());
                     }
+                    validate::validate_route_planets(&planets)?;
                 }
-            }
+                "show" => {
+                    let id = tokens
+                        .get(2)
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    validate::validate_route_id(id, "show")?;
+                }
+                "explain" => {
+                    let id = tokens
+                        .get(2)
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    validate::validate_route_id(id, "explain")?;
+                }
+                _ => {}
+            },
 
             _ => {}
         }

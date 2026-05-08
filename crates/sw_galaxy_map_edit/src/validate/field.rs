@@ -60,12 +60,10 @@ pub fn validate_field_value(field: EditableField, value: &FieldValue) -> Vec<Val
             | EditableField::Status
             | EditableField::Reference,
             FieldValue::Text(text),
-        ) => {
-            if text != text.trim() {
-                issues.push(ValidationIssue::warning(
-                    "Text value contains leading or trailing whitespace.",
-                ));
-            }
+        ) if text != text.trim() => {
+            issues.push(ValidationIssue::warning(
+                "Text value contains leading or trailing whitespace.",
+            ));
         }
 
         (EditableField::Grid, FieldValue::Text(text)) => {
@@ -82,28 +80,26 @@ pub fn validate_field_value(field: EditableField, value: &FieldValue) -> Vec<Val
             }
         }
 
-        (EditableField::Lat, FieldValue::Real { value, .. }) => {
-            if !(-90.0..=90.0).contains(value) {
-                issues.push(ValidationIssue::error(
-                    "Latitude must be within the range [-90, 90].",
-                ));
-            }
+        (EditableField::Lat, FieldValue::Real { value, .. }) if !(-90.0..=90.0).contains(value) => {
+            issues.push(ValidationIssue::error(
+                "Latitude must be within the range [-90, 90].",
+            ));
         }
 
-        (EditableField::Long, FieldValue::Real { value, .. }) => {
-            if !(-180.0..=180.0).contains(value) {
-                issues.push(ValidationIssue::error(
-                    "Longitude must be within the range [-180, 180].",
-                ));
-            }
+        (EditableField::Long, FieldValue::Real { value, .. })
+            if !(-180.0..=180.0).contains(value) =>
+        {
+            issues.push(ValidationIssue::error(
+                "Longitude must be within the range [-180, 180].",
+            ));
         }
 
-        (EditableField::X | EditableField::Y, FieldValue::Real { value, .. }) => {
-            if !value.is_finite() {
-                issues.push(ValidationIssue::error(
-                    "Coordinate value must be a finite number.",
-                ));
-            }
+        (EditableField::X | EditableField::Y, FieldValue::Real { value, .. })
+            if !value.is_finite() =>
+        {
+            issues.push(ValidationIssue::error(
+                "Coordinate value must be a finite number.",
+            ));
         }
 
         (_, FieldValue::Null) => {
@@ -111,12 +107,10 @@ pub fn validate_field_value(field: EditableField, value: &FieldValue) -> Vec<Val
             // No extra issues here for now.
         }
 
-        (_, FieldValue::Real { value, .. }) => {
-            if !value.is_finite() {
-                issues.push(ValidationIssue::error(
-                    "Numeric value must be a finite number.",
-                ));
-            }
+        (_, FieldValue::Real { value, .. }) if !value.is_finite() => {
+            issues.push(ValidationIssue::error(
+                "Numeric value must be a finite number.",
+            ));
         }
 
         _ => {}
