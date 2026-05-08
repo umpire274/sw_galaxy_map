@@ -1,5 +1,5 @@
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::models::{NormalizedPlanet, UpsertOutcome};
 
