@@ -1,31 +1,60 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Command-line arguments for the synchronization tool.
+/// ArcGIS-first synchronization and ingestion tool.
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Cli {
-    /// Path to the SQLite database.
-    #[arg(long)]
-    pub db: PathBuf,
+    #[command(subcommand)]
+    pub command: Commands,
+}
 
-    /// Path to the official CSV file.
-    #[arg(long)]
-    pub csv: PathBuf,
+/// Top-level commands.
+#[derive(Debug, Subcommand)]
+pub enum Commands {
+    /// ArcGIS data ingestion commands.
+    #[command(subcommand)]
+    Arcgis(ArcgisCommand),
+}
 
-    /// Target table name.
-    #[arg(long, default_value = "planets")]
-    pub table: String,
+/// ArcGIS command group.
+#[derive(Debug, Subcommand)]
+pub enum ArcgisCommand {
+    /// Download ArcGIS data and write normalized JSON.
+    Fetch {
+        /// Output JSON file.
+        #[arg(long)]
+        out: PathBuf,
 
-    /// CSV delimiter. Use ';' for semicolon-separated files.
-    #[arg(long, default_value = ",")]
-    pub delimiter: char,
+        /// ArcGIS page size.
+        #[arg(long, default_value_t = 2000)]
+        page_size: i64,
 
-    /// Perform a dry run without changing the database.
-    #[arg(long, default_value_t = false)]
-    pub dry_run: bool,
+        /// Pretty-print JSON.
+        #[arg(long, default_value_t = true)]
+        pretty: bool,
+    },
 
-    /// Mark records not present in CSV as deleted.
-    #[arg(long, default_value_t = false)]
-    pub mark_deleted: bool,
+    /// Download ArcGIS data and import/upsert it into SQLite.
+    Import {
+        /// SQLite database path.
+        #[arg(long)]
+        db: PathBuf,
+
+        /// Target known planets table.
+        #[arg(long, default_value = "planets")]
+        table: String,
+
+        /// Target unknown planets table.
+        #[arg(long, default_value = "planets_unknown")]
+        unknown_table: String,
+
+        /// ArcGIS page size.
+        #[arg(long, default_value_t = 2000)]
+        page_size: i64,
+
+        /// Run without applying database changes.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
 }

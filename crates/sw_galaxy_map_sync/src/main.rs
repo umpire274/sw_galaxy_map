@@ -1,46 +1,55 @@
-mod cli;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
-use rusqlite::Connection;
-
-use cli::Cli;
-use sw_galaxy_map_sync::{SyncOptions, run_sync};
+use sw_galaxy_map_sync::cli::{ArcgisCommand, Cli, Commands};
+use sw_galaxy_map_sync::pipeline::arcgis_import::{
+    ArcgisFetchOptions, ArcgisImportOptions, fetch_arcgis_to_file, import_arcgis_to_sqlite,
+};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let delimiter = cli
-        .delimiter
-        .to_string()
-        .as_bytes()
-        .first()
-        .copied()
-        .context("Invalid delimiter")?;
+    match cli.command {
+        Commands::Arcgis(command) => match command {
+            ArcgisCommand::Fetch {
+                out,
+                page_size,
+                pretty,
+            } => fetch_arcgis_to_file(&ArcgisFetchOptions {
+                out,
+                page_size,
+                pretty,
+            }),
 
-    let mut conn = Connection::open(&cli.db)
-        .with_context(|| format!("Unable to open DB: {}", cli.db.display()))?;
+            ArcgisCommand::Import {
+                db,
+                table,
+                unknown_table,
+                page_size,
+                dry_run,
+            } => {
+                let result = import_arcgis_to_sqlite(&ArcgisImportOptions {
+                    db,
+                    table,
+                    unknown_table,
+                    page_size,
+                    dry_run,
+                })?;
 
-    let opts = SyncOptions {
-        csv: cli.csv,
-        table: cli.table,
-        delimiter,
-        dry_run: cli.dry_run,
-        mark_deleted: cli.mark_deleted,
-        report_path: Some("sync_report.xlsx".to_string()),
-    };
+                println!();
+                println!("ArcGIS import completed.");
+                println!("Fetched          : {}", result.fetched);
+                println!("Known records    : {}", result.known);
+                println!("Unknown records  : {}", result.unknown);
+                println!("Known inserted   : {}", result.inserted);
+                println!("Known updated    : {}", result.updated);
+                println!("Known skipped    : {}", result.skipped);
+                println!("Unknown inserted : {}", result.unknown_inserted);
+                println!("Unknown updated  : {}", result.unknown_updated);
+                println!("Unknown skipped  : {}", result.unknown_skipped);
+                println!("Dry run          : {}", result.dry_run);
 
-    let result = run_sync(&mut conn, &opts)?;
-
-    println!();
-    println!("Done.");
-    println!("Inserted         : {}", result.stats.inserted);
-    println!("Updated exact    : {}", result.stats.updated_exact);
-    println!("Updated suffix   : {}", result.stats.updated_suffix);
-    println!("Invalid CSV rows : {}", result.stats.invalid_csv_rows);
-    println!("Marked invalid   : {}", result.stats.invalid_marked);
-    println!("Skipped DB       : {}", result.stats.skipped_db);
-    println!("Logically deleted: {}", result.stats.deleted_logically);
-
-    Ok(())
+                Ok(())
+            }
+        },
+    }
 }

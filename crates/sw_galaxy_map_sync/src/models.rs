@@ -1,113 +1,88 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-/// Minimal DB row shape used for matching.
-#[derive(Debug)]
-pub struct DbPlanetRow {
+/// Normalized planet record produced from ArcGIS attributes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NormalizedPlanet {
     pub fid: i64,
     pub planet: String,
-    pub sector: String,
+    pub planet_norm: String,
     pub region: String,
-    pub grid: String,
-}
-
-/// Minimal DB row for audit phase.
-#[derive(Debug)]
-pub struct DbRow {
-    pub fid: i64,
-    pub planet: String,
     pub sector: String,
-    pub region: String,
+    pub system: String,
     pub grid: String,
-    pub status: String,
-}
-
-/// Default values used when inserting a new planets row from the official CSV.
-#[derive(Debug, Clone)]
-pub struct InsertDefaults {
-    pub x: f64,
-    pub y: f64,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub arcgis_hash: String,
     pub canon: i64,
     pub legends: i64,
-    pub arcgis_hash: String,
+    pub raw: Value,
 }
 
-impl Default for InsertDefaults {
-    fn default() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            canon: 1,
-            legends: 0,
-            arcgis_hash: String::new(),
+/// Classified ArcGIS record.
+///
+/// Records with a valid planet name are imported into the main `planets`
+/// table. Records without a planet name are preserved in `planets_unknown`
+/// instead of being discarded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "record", rename_all = "snake_case")]
+pub enum ArcgisRecord {
+    Known(NormalizedPlanet),
+    Unknown(NormalizedPlanet),
+}
+
+impl ArcgisRecord {
+    /// Returns the normalized planet payload.
+    pub fn planet(&self) -> &NormalizedPlanet {
+        match self {
+            ArcgisRecord::Known(planet) | ArcgisRecord::Unknown(planet) => planet,
         }
+    }
+
+    /// Returns true when the record contains a usable planet name.
+    pub fn is_known(&self) -> bool {
+        matches!(self, ArcgisRecord::Known(_))
     }
 }
 
-/// Type-safe report classification.
-#[derive(Debug, Clone, Copy)]
-pub enum ReportKind {
-    Inserted,
-    Modified,
-    Active,
-    Invalid,
-    Skipped,
-    Deleted,
+/// Normalized ArcGIS fetch result split by classification.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ArcgisDataset {
+    pub known: Vec<NormalizedPlanet>,
+    pub unknown: Vec<NormalizedPlanet>,
 }
 
-/// One row in the final report.
-#[derive(Debug, Clone)]
-pub struct ReportRow {
-    pub fid: Option<i64>,
-    pub planet: String,
-    pub sector: String,
-    pub region: String,
-    pub grid: String,
+impl ArcgisDataset {
+    /// Total number of records.
+    pub fn len(&self) -> usize {
+        self.known.len() + self.unknown.len()
+    }
+
+    /// Returns true when there are no records.
+    pub fn is_empty(&self) -> bool {
+        self.known.is_empty() && self.unknown.is_empty()
+    }
 }
 
-/// Deserialize one official CSV row.
-#[derive(Debug, Deserialize)]
-pub struct OfficialRow {
-    #[serde(rename = "system")]
-    pub system: String,
-
-    #[serde(rename = "sector")]
-    pub sector: Option<String>,
-
-    #[serde(rename = "region")]
-    pub region: Option<String>,
-
-    #[serde(rename = "grid")]
-    pub grid: Option<String>,
-}
-
-/// Internal normalized row used during synchronization.
-#[derive(Debug, Clone)]
-pub struct SyncRow {
-    pub system: String,
-    pub sector: String,
-    pub region: String,
-    pub grid: String,
-}
-
-/// Summary counters for the sync run.
-#[derive(Debug, Default, Clone)]
-pub struct SyncStats {
+/// Result of an ArcGIS import operation.
+#[derive(Debug, Clone, Default)]
+pub struct ArcgisImportResult {
+    pub fetched: usize,
+    pub known: usize,
+    pub unknown: usize,
     pub inserted: usize,
-    pub updated_exact: usize,
-    pub updated_suffix: usize,
-    pub invalid_csv_rows: usize,
-    pub invalid_marked: usize,
-    pub skipped_db: usize,
-    pub deleted_logically: usize,
+    pub updated: usize,
+    pub skipped: usize,
+    pub unknown_inserted: usize,
+    pub unknown_updated: usize,
+    pub unknown_skipped: usize,
+    pub dry_run: bool,
 }
 
-/// Report grouped by status.
-#[derive(Debug, Default)]
-pub struct SyncReport {
-    pub inserted: Vec<ReportRow>,
-    pub modified: Vec<ReportRow>,
-    pub active: Vec<ReportRow>,
-    pub invalid: Vec<ReportRow>,
-    pub skipped: Vec<ReportRow>,
-    pub deleted: Vec<ReportRow>,
+/// Classification returned by the SQLite upsert layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Inserted,
+    Updated,
+    Skipped,
 }

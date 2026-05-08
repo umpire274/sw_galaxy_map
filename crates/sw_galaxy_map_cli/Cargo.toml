@@ -25,7 +25,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 sw_galaxy_map_core = { version = "0.15.2", path = "../sw_galaxy_map_core" }
-sw_galaxy_map_sync = { version = "0.2.0", path = "../sw_galaxy_map_sync" }
+sw_galaxy_map_sync = { version = "0.3.0", path = "../sw_galaxy_map_sync" }
 crossterm = "0.29.0"
 ratatui = "0.30.0"
 chrono = "0.4.44"
