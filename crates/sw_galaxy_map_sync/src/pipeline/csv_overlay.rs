@@ -1,4 +1,4 @@
-use crate::db::sqlite::{ensure_required_schema, upsert_meta_json, SqlitePlanetRepository};
+use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
 use crate::models::{CsvOverlayFormat, CsvOverlayOutcome, CsvOverlayStats};
 use crate::sources::csv::load_overlay_csv;
 use anyhow::{Context, Result};

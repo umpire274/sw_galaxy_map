@@ -2,9 +2,9 @@ use crate::models::{
     CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
 };
 use crate::utils::{build_planet_norm, cmp_key, same_overlay_fields, strip_roman_suffix};
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
 
 /// SQLite repository for planet synchronization/import operations.
 pub struct SqlitePlanetRepository<'conn> {
