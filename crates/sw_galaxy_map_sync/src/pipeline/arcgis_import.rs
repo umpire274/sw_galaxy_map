@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
-use rusqlite::Connection;
-use std::fs;
-use std::path::PathBuf;
-
-use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema};
+use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
 use crate::models::{ArcgisImportResult, UpsertOutcome};
 use crate::sources::arcgis::fetch_arcgis_dataset;
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+use serde_json::json;
+use std::fs;
+use std::path::PathBuf;
 
 /// Options for ArcGIS JSON export.
 #[derive(Debug, Clone)]
@@ -104,6 +104,26 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
         }
     }
     tx.commit()?;
+
+    if !options.dry_run {
+        let meta = json!({
+            "crate_version": env!("CARGO_PKG_VERSION"),
+            "operation": "arcgis_import",
+            "completed_at_utc": chrono::Utc::now().to_rfc3339(),
+            "fetched": result.fetched,
+            "known": result.known,
+            "unknown": result.unknown,
+            "known_inserted": result.inserted,
+            "known_updated": result.updated,
+            "known_skipped": result.skipped,
+            "unknown_inserted": result.unknown_inserted,
+            "unknown_updated": result.unknown_updated,
+            "unknown_skipped": result.unknown_skipped,
+            "dry_run": result.dry_run,
+        });
+
+        upsert_meta_json(&conn, "sync.arcgis.last_run", &meta)?;
+    }
 
     Ok(result)
 }

@@ -1,10 +1,10 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OptionalExtension, params};
-
 use crate::models::{
     CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
 };
 use crate::utils::{build_planet_norm, cmp_key, same_overlay_fields, strip_roman_suffix};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
 
 /// SQLite repository for planet synchronization/import operations.
 pub struct SqlitePlanetRepository<'conn> {
@@ -379,6 +379,32 @@ pub fn ensure_required_schema(
                 create_table_like(conn, planets_table, unknown_table)?;
             }
 
+            let mut created_tables = vec![
+                "meta",
+                "planets",
+                "planets_unknown",
+                "waypoints",
+                "waypoint_planets",
+                "routes",
+                "route_detours",
+                "route_waypoints",
+                "planet_aliases",
+                "planets_search",
+            ];
+
+            if enable_fts {
+                created_tables.push("planets_fts");
+            }
+
+            let meta = json!({
+                "crate_version": env!("CARGO_PKG_VERSION"),
+                "operation": "schema_bootstrap",
+                "completed_at_utc": chrono::Utc::now().to_rfc3339(),
+                "fts_enabled": enable_fts,
+                "created_tables": created_tables,
+            });
+
+            upsert_meta_json(conn, "sync.schema.last_bootstrap", &meta)?;
             Ok(())
         }
 
@@ -483,4 +509,23 @@ fn quote_ident(value: &str) -> String {
 
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
+}
+
+/// Inserts or updates a JSON metadata value in the `meta` table.
+///
+/// The `meta.key` column is expected to be a primary key.
+pub fn upsert_meta_json(conn: &Connection, key: &str, value: &Value) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+
+    conn.execute(
+        r#"
+        INSERT INTO meta (key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value
+        "#,
+        params![key, json],
+    )?;
+
+    Ok(())
 }
