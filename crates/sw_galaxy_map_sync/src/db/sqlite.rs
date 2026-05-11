@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
-
+use serde_json::Value;
 use crate::models::{
     CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
 };
@@ -483,4 +483,23 @@ fn quote_ident(value: &str) -> String {
 
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
+}
+
+/// Inserts or updates a JSON metadata value in the `meta` table.
+///
+/// The `meta.key` column is expected to be a primary key.
+pub fn upsert_meta_json(conn: &Connection, key: &str, value: &Value) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+
+    conn.execute(
+        r#"
+        INSERT INTO meta (key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value
+        "#,
+        params![key, json],
+    )?;
+
+    Ok(())
 }

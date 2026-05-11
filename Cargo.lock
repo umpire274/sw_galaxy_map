@@ -4390,6 +4390,7 @@ name = "sw_galaxy_map_sync"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "csv",
  "indicatif",
