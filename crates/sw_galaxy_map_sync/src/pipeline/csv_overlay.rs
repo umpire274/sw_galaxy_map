@@ -32,7 +32,12 @@ pub fn apply_csv_overlay(options: &CsvOverlayOptions) -> Result<CsvOverlayStats>
     if options.dry_run {
         let conn = Connection::open(&options.db)
             .with_context(|| format!("Unable to open DB: {}", options.db.display()))?;
-        ensure_required_schema(&conn, &options.table, &options.unknown_table)?;
+        ensure_required_schema(
+            &conn,
+            &options.table,
+            &options.unknown_table,
+            !options.dry_run,
+        )?;
         let repo = SqlitePlanetRepository::new(&conn, &options.table);
         repo.ensure_table_exists()?;
 
@@ -57,7 +62,12 @@ pub fn apply_csv_overlay(options: &CsvOverlayOptions) -> Result<CsvOverlayStats>
     let mut conn = Connection::open(&options.db)
         .with_context(|| format!("Unable to open DB: {}", options.db.display()))?;
 
-    ensure_required_schema(&conn, &options.table, &options.unknown_table)?;
+    ensure_required_schema(
+        &conn,
+        &options.table,
+        &options.unknown_table,
+        !options.dry_run,
+    )?;
 
     let tx = conn.transaction()?;
     {

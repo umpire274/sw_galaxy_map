@@ -77,7 +77,12 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
     let mut conn = Connection::open(&options.db)
         .with_context(|| format!("Unable to open DB: {}", options.db.display()))?;
 
-    ensure_required_schema(&conn, &options.table, &options.unknown_table)?;
+    ensure_required_schema(
+        &conn,
+        &options.table,
+        &options.unknown_table,
+        !options.dry_run,
+    )?;
 
     let tx = conn.transaction()?;
     {
