@@ -334,13 +334,15 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         Ok(())
     }
 
-    fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+    pub fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+        let deleted = i64::from(status.eq_ignore_ascii_case("deleted"));
+
         let sql = format!(
-            "UPDATE {} SET status = ?2, deleted = 0 WHERE FID = ?1",
+            "UPDATE {} SET status = ?2, deleted = ?3 WHERE FID = ?1",
             quote_ident(&self.table)
         );
 
-        self.conn.execute(&sql, params![fid, status])?;
+        self.conn.execute(&sql, params![fid, status, deleted])?;
 
         Ok(())
     }
@@ -448,13 +450,7 @@ fn exists_in_csv(db_row: &PlanetDbRow, csv_rows: &[CsvOverlayRow]) -> bool {
         let csv_name = cmp_key(&row.system);
         let csv_base = strip_roman_suffix(&csv_name);
 
-        db_name == csv_name
-            || db_base == csv_name
-            || db_name == csv_base
-            || db_base == csv_base
-            || (cmp_key(&db_row.sector) == cmp_key(&row.sector)
-                && cmp_key(&db_row.region) == cmp_key(&row.region)
-                && cmp_key(&db_row.grid) == cmp_key(&row.grid))
+        db_name == csv_name || db_base == csv_name || db_name == csv_base || db_base == csv_base
     })
 }
 
