@@ -334,13 +334,15 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         Ok(())
     }
 
-    fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+    pub fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+        let deleted = i64::from(status.eq_ignore_ascii_case("deleted"));
+
         let sql = format!(
-            "UPDATE {} SET status = ?2, deleted = 0 WHERE FID = ?1",
+            "UPDATE {} SET status = ?2, deleted = ?3 WHERE FID = ?1",
             quote_ident(&self.table)
         );
 
-        self.conn.execute(&sql, params![fid, status])?;
+        self.conn.execute(&sql, params![fid, status, deleted])?;
 
         Ok(())
     }
