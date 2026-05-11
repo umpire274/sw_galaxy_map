@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_sync"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "ArcGIS-first synchronization and ingestion tool for the Star Wars galaxy map and Astronavis datasets"
