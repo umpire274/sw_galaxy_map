@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use anyhow::{bail, Context, Result};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{
     CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
@@ -448,13 +448,7 @@ fn exists_in_csv(db_row: &PlanetDbRow, csv_rows: &[CsvOverlayRow]) -> bool {
         let csv_name = cmp_key(&row.system);
         let csv_base = strip_roman_suffix(&csv_name);
 
-        db_name == csv_name
-            || db_base == csv_name
-            || db_name == csv_base
-            || db_base == csv_base
-            || (cmp_key(&db_row.sector) == cmp_key(&row.sector)
-                && cmp_key(&db_row.region) == cmp_key(&row.region)
-                && cmp_key(&db_row.grid) == cmp_key(&row.grid))
+        db_name == csv_name || db_base == csv_name || db_name == csv_base || db_base == csv_base
     })
 }
 
