@@ -364,6 +364,7 @@ pub fn ensure_required_schema(
     conn: &Connection,
     planets_table: &str,
     unknown_table: &str,
+    persist_meta: bool,
 ) -> Result<()> {
     let has_planets = table_exists(conn, planets_table)?;
     let has_unknown = table_exists(conn, unknown_table)?;
@@ -379,32 +380,35 @@ pub fn ensure_required_schema(
                 create_table_like(conn, planets_table, unknown_table)?;
             }
 
-            let mut created_tables = vec![
-                "meta",
-                "planets",
-                "planets_unknown",
-                "waypoints",
-                "waypoint_planets",
-                "routes",
-                "route_detours",
-                "route_waypoints",
-                "planet_aliases",
-                "planets_search",
-            ];
+            if persist_meta {
+                let mut created_tables = vec![
+                    "meta",
+                    "planets",
+                    "planets_unknown",
+                    "waypoints",
+                    "waypoint_planets",
+                    "routes",
+                    "route_detours",
+                    "route_waypoints",
+                    "planet_aliases",
+                    "planets_search",
+                ];
 
-            if enable_fts {
-                created_tables.push("planets_fts");
+                if enable_fts {
+                    created_tables.push("planets_fts");
+                }
+
+                let meta = json!({
+                    "crate_version": env!("CARGO_PKG_VERSION"),
+                    "operation": "schema_bootstrap",
+                    "completed_at_utc": chrono::Utc::now().to_rfc3339(),
+                    "fts_enabled": enable_fts,
+                    "created_tables": created_tables,
+                });
+
+                upsert_meta_json(conn, "sync.schema.last_bootstrap", &meta)?;
             }
 
-            let meta = json!({
-                "crate_version": env!("CARGO_PKG_VERSION"),
-                "operation": "schema_bootstrap",
-                "completed_at_utc": chrono::Utc::now().to_rfc3339(),
-                "fts_enabled": enable_fts,
-                "created_tables": created_tables,
-            });
-
-            upsert_meta_json(conn, "sync.schema.last_bootstrap", &meta)?;
             Ok(())
         }
 
