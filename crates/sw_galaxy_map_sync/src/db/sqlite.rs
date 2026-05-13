@@ -1,10 +1,10 @@
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OptionalExtension, params};
-
 use crate::models::{
     CsvOverlayOutcome, CsvOverlayRow, NormalizedPlanet, PlanetDbRow, UpsertOutcome,
 };
 use crate::utils::{build_planet_norm, cmp_key, same_overlay_fields, strip_roman_suffix};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
 
 /// SQLite repository for planet synchronization/import operations.
 pub struct SqlitePlanetRepository<'conn> {
@@ -334,13 +334,15 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         Ok(())
     }
 
-    fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+    pub fn set_status(&self, fid: i64, status: &str) -> Result<()> {
+        let deleted = i64::from(status.eq_ignore_ascii_case("deleted"));
+
         let sql = format!(
-            "UPDATE {} SET status = ?2, deleted = 0 WHERE FID = ?1",
+            "UPDATE {} SET status = ?2, deleted = ?3 WHERE FID = ?1",
             quote_ident(&self.table)
         );
 
-        self.conn.execute(&sql, params![fid, status])?;
+        self.conn.execute(&sql, params![fid, status, deleted])?;
 
         Ok(())
     }
@@ -362,6 +364,7 @@ pub fn ensure_required_schema(
     conn: &Connection,
     planets_table: &str,
     unknown_table: &str,
+    persist_meta: bool,
 ) -> Result<()> {
     let has_planets = table_exists(conn, planets_table)?;
     let has_unknown = table_exists(conn, unknown_table)?;
@@ -375,6 +378,35 @@ pub fn ensure_required_schema(
 
             if !table_exists(conn, unknown_table)? {
                 create_table_like(conn, planets_table, unknown_table)?;
+            }
+
+            if persist_meta {
+                let mut created_tables = vec![
+                    "meta",
+                    "planets",
+                    "planets_unknown",
+                    "waypoints",
+                    "waypoint_planets",
+                    "routes",
+                    "route_detours",
+                    "route_waypoints",
+                    "planet_aliases",
+                    "planets_search",
+                ];
+
+                if enable_fts {
+                    created_tables.push("planets_fts");
+                }
+
+                let meta = json!({
+                    "crate_version": env!("CARGO_PKG_VERSION"),
+                    "operation": "schema_bootstrap",
+                    "completed_at_utc": chrono::Utc::now().to_rfc3339(),
+                    "fts_enabled": enable_fts,
+                    "created_tables": created_tables,
+                });
+
+                upsert_meta_json(conn, "sync.schema.last_bootstrap", &meta)?;
             }
 
             Ok(())
@@ -448,13 +480,7 @@ fn exists_in_csv(db_row: &PlanetDbRow, csv_rows: &[CsvOverlayRow]) -> bool {
         let csv_name = cmp_key(&row.system);
         let csv_base = strip_roman_suffix(&csv_name);
 
-        db_name == csv_name
-            || db_base == csv_name
-            || db_name == csv_base
-            || db_base == csv_base
-            || (cmp_key(&db_row.sector) == cmp_key(&row.sector)
-                && cmp_key(&db_row.region) == cmp_key(&row.region)
-                && cmp_key(&db_row.grid) == cmp_key(&row.grid))
+        db_name == csv_name || db_base == csv_name || db_name == csv_base || db_base == csv_base
     })
 }
 
@@ -487,4 +513,23 @@ fn quote_ident(value: &str) -> String {
 
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
+}
+
+/// Inserts or updates a JSON metadata value in the `meta` table.
+///
+/// The `meta.key` column is expected to be a primary key.
+pub fn upsert_meta_json(conn: &Connection, key: &str, value: &Value) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+
+    conn.execute(
+        r#"
+        INSERT INTO meta (key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value
+        "#,
+        params![key, json],
+    )?;
+
+    Ok(())
 }
