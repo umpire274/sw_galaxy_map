@@ -97,6 +97,11 @@ async fn main() -> Result<()> {
                 let cfg = load_db_config(&db_config)?;
                 postgres::test_connection(&cfg).await
             }
+
+            DbCommands::Bootstrap { db_config } => {
+                let cfg = load_db_config(&db_config)?;
+                postgres::bootstrap_schema(&cfg).await
+            }
         },
     }
 }

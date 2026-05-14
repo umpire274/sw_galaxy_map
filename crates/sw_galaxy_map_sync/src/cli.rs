@@ -121,4 +121,9 @@ pub enum DbCommands {
         #[arg(long)]
         db_config: PathBuf,
     },
+
+    Bootstrap {
+        #[arg(long)]
+        db_config: PathBuf,
+    },
 }
