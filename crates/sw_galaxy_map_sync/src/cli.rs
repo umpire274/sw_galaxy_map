@@ -21,6 +21,10 @@ pub enum Commands {
     /// CSV overlay commands.
     #[command(subcommand)]
     Csv(CsvCommand),
+
+    /// Database Operations commands.
+    #[command(subcommand)]
+    Db(DbCommands),
 }
 
 /// ArcGIS command group.
@@ -101,5 +105,20 @@ pub enum CsvCommand {
         /// Run without applying database changes.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+    },
+}
+
+/// Enum representing commands for interacting with the database.
+///
+/// This enum is used to define the different commands that can be executed on the database.
+/// It contains a single variant called `Test`, which takes a database configuration path as an argument.
+/// The database configuration path is used to specify the location and settings of the database to be tested.
+/// The purpose of this command is to test the database connection and ensure that it is working correctly.
+/// It is important to note that this command should only be used for testing purposes and should not be used in a production environment.
+#[derive(Subcommand, Debug)]
+pub enum DbCommands {
+    Test {
+        #[arg(long)]
+        db_config: PathBuf,
     },
 }

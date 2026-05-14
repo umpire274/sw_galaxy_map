@@ -25,6 +25,12 @@ reqwest.workspace = true
 chrono.workspace = true
 sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
 
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "postgres",
+    "runtime-tokio"
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
 [lib]
 name = "sw_galaxy_map_sync"
 path = "src/lib.rs"

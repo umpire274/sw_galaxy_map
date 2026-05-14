@@ -1,12 +1,15 @@
 use anyhow::{Result, bail};
 use clap::Parser;
-use sw_galaxy_map_sync::cli::{ArcgisCommand, Cli, Commands, CsvCommand};
+use sw_galaxy_map_sync::cli::{ArcgisCommand, Cli, Commands, CsvCommand, DbCommands};
+use sw_galaxy_map_sync::db::config::load_db_config;
+use sw_galaxy_map_sync::db::postgres;
 use sw_galaxy_map_sync::pipeline::arcgis_import::{
     ArcgisFetchOptions, ArcgisImportOptions, fetch_arcgis_to_file, import_arcgis_to_sqlite,
 };
 use sw_galaxy_map_sync::pipeline::csv_overlay::{CsvOverlayOptions, apply_csv_overlay};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -87,6 +90,12 @@ fn main() -> Result<()> {
                 println!("Dry run          : {}", stats.dry_run);
 
                 Ok(())
+            }
+        },
+        Commands::Db(command) => match command {
+            DbCommands::Test { db_config } => {
+                let cfg = load_db_config(&db_config)?;
+                postgres::test_connection(&cfg).await
             }
         },
     }
