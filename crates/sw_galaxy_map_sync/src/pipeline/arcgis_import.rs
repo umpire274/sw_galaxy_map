@@ -2,8 +2,9 @@ use crate::db::config::DbConfig;
 use crate::db::postgres::{
     bootstrap_schema, build_postgres_url, upsert_known_arcgis_planet, upsert_unknown_arcgis_planet,
 };
-use crate::db::sqlite::{ensure_required_schema, upsert_meta_json, SqlitePlanetRepository};
+use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
 use crate::models::{ArcgisImportResult, UpsertOutcome};
+use crate::progress::import_progress_bar;
 use crate::sources::arcgis::fetch_arcgis_dataset;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -89,6 +90,9 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
         !options.dry_run,
     )?;
 
+    println!();
+    let pb = import_progress_bar(dataset.len(), "Importing ArcGIS records into SQLite...")?;
+
     let tx = conn.transaction()?;
     {
         let known_repo = SqlitePlanetRepository::new(&tx, &options.table);
@@ -103,6 +107,7 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
                 UpsertOutcome::Updated => result.updated += 1,
                 UpsertOutcome::Skipped => result.skipped += 1,
             }
+            pb.inc(1);
         }
 
         for planet in &dataset.unknown {
@@ -111,9 +116,13 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
                 UpsertOutcome::Updated => result.unknown_updated += 1,
                 UpsertOutcome::Skipped => result.unknown_skipped += 1,
             }
+            pb.inc(1);
         }
     }
     tx.commit()?;
+
+    pb.finish_with_message("SQLite ArcGIS import completed.");
+    println!();
 
     if !options.dry_run {
         let meta = json!({
@@ -167,12 +176,16 @@ pub async fn import_arcgis_to_postgres(
     let url = build_postgres_url(cfg)?;
     let mut conn = PgConnection::connect(&url).await?;
 
+    println!();
+    let pb = import_progress_bar(dataset.len(), "Importing ArcGIS records into PostgreSQL...")?;
+
     for planet in &dataset.known {
         match upsert_known_arcgis_planet(&mut conn, planet).await? {
             UpsertOutcome::Inserted => result.inserted += 1,
             UpsertOutcome::Updated => result.updated += 1,
             UpsertOutcome::Skipped => result.skipped += 1,
         }
+        pb.inc(1);
     }
 
     for planet in &dataset.unknown {
@@ -181,7 +194,11 @@ pub async fn import_arcgis_to_postgres(
             UpsertOutcome::Updated => result.unknown_updated += 1,
             UpsertOutcome::Skipped => result.unknown_skipped += 1,
         }
+        pb.inc(1);
     }
+
+    pb.finish_with_message("PostgreSQL ArcGIS import completed.");
+    println!();
 
     Ok(result)
 }
