@@ -138,7 +138,13 @@ pub enum DbCommands {
     },
 
     Bootstrap {
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
         #[arg(long)]
-        db_config: PathBuf,
+        db: Option<PathBuf>,
+
+        #[arg(long)]
+        db_config: Option<PathBuf>,
     },
 }

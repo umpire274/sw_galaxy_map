@@ -143,10 +143,41 @@ async fn main() -> Result<()> {
                 postgres::test_connection(&cfg).await
             }
 
-            DbCommands::Bootstrap { db_config } => {
-                let cfg = load_db_config(&db_config)?;
-                postgres::bootstrap_schema(&cfg).await
-            }
+            DbCommands::Bootstrap {
+                driver,
+                db,
+                db_config,
+            } => match driver {
+                DbDriverArg::Sqlite => {
+                    let db =
+                        db.ok_or_else(|| anyhow::anyhow!("--db is required when --driver sqlite"))?;
+
+                    let conn = rusqlite::Connection::open(&db).map_err(|err| {
+                        anyhow::anyhow!("Unable to open SQLite DB {}: {err}", db.display())
+                    })?;
+
+                    sw_galaxy_map_sync::db::schema::sqlite::create_sqlite_schema(&conn)?;
+
+                    println!("SQLite schema bootstrap completed.");
+                    println!("Database: {}", db.display());
+
+                    Ok(())
+                }
+
+                DbDriverArg::Postgres => {
+                    let db_config = db_config.ok_or_else(|| {
+                        anyhow::anyhow!("--db-config is required when --driver postgres")
+                    })?;
+
+                    let cfg = load_db_config(&db_config)?;
+
+                    postgres::bootstrap_schema(&cfg).await
+                }
+
+                DbDriverArg::Mysql => {
+                    bail!("MySQL backend is not implemented yet");
+                }
+            },
         },
     }
 }
