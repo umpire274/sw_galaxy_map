@@ -337,3 +337,25 @@ pub async fn upsert_unknown_arcgis_planet(
         UpsertOutcome::Inserted
     })
 }
+
+pub async fn upsert_meta_struct<T>(conn: &mut PgConnection, key: &str, value: &T) -> Result<()>
+where
+    T: serde::Serialize,
+{
+    let json = serde_json::to_string_pretty(value)?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO meta (key, value)
+        VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET
+            value = EXCLUDED.value
+        "#,
+    )
+    .bind(key)
+    .bind(json)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}

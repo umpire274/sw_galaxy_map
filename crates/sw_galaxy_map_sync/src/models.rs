@@ -152,3 +152,21 @@ pub struct CsvOverlayStats {
     pub skipped: usize,
     pub dry_run: bool,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArcgisImportMeta<'a> {
+    pub crate_version: &'a str,
+    pub operation: &'a str,
+    pub backend: &'a str,
+    pub completed_at_utc: String,
+    pub fetched: usize,
+    pub known: usize,
+    pub unknown: usize,
+    pub known_inserted: usize,
+    pub known_updated: usize,
+    pub known_skipped: usize,
+    pub unknown_inserted: usize,
+    pub unknown_updated: usize,
+    pub unknown_skipped: usize,
+    pub dry_run: bool,
+}

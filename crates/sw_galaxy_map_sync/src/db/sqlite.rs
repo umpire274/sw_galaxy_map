@@ -533,3 +533,11 @@ pub fn upsert_meta_json(conn: &Connection, key: &str, value: &Value) -> Result<(
 
     Ok(())
 }
+
+pub fn upsert_meta_struct<T>(conn: &Connection, key: &str, value: &T) -> Result<()>
+where
+    T: serde::Serialize,
+{
+    let json = serde_json::to_value(value)?;
+    upsert_meta_json(conn, key, &json)
+}
