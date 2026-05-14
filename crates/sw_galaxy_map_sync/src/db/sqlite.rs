@@ -13,6 +13,14 @@ pub struct SqlitePlanetRepository<'conn> {
 }
 
 impl<'conn> SqlitePlanetRepository<'conn> {
+    pub fn count_planet_rows(&self) -> Result<usize> {
+        let sql = format!("SELECT COUNT(*) FROM {}", quote_ident(&self.table));
+        let count: i64 = self.conn.query_row(&sql, [], |row| row.get(0))?;
+        Ok(count as usize)
+    }
+}
+
+impl<'conn> SqlitePlanetRepository<'conn> {
     /// Create a new SQLite planet repository.
     pub fn new(conn: &'conn Connection, table: impl Into<String>) -> Self {
         Self {
@@ -75,6 +83,7 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         &self,
         csv_rows: &[CsvOverlayRow],
         dry_run: bool,
+        progress: Option<&indicatif::ProgressBar>,
     ) -> Result<(usize, usize)> {
         let db_rows = self.load_planet_rows()?;
         let mut deleted = 0usize;
@@ -93,6 +102,9 @@ impl<'conn> SqlitePlanetRepository<'conn> {
                 if !dry_run {
                     self.set_status(db_row.fid, "deleted")?;
                 }
+            }
+            if let Some(pb) = progress {
+                pb.inc(1);
             }
         }
 

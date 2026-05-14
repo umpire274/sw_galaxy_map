@@ -1,7 +1,6 @@
+use crate::models::CsvOverlayFormat;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
-
-use crate::models::CsvOverlayFormat;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum DbDriverArg {
@@ -89,13 +88,29 @@ pub enum ArcgisCommand {
 pub enum CsvCommand {
     /// Apply a curated CSV overlay over the ArcGIS baseline.
     Overlay {
+        /// Database backend driver.
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
         /// SQLite database path.
         #[arg(long)]
-        db: PathBuf,
+        db: Option<PathBuf>,
 
-        /// CSV overlay file.
+        /// JSON database configuration for remote backends.
+        #[arg(long)]
+        db_config: Option<PathBuf>,
+
+        /// CSV input path.
         #[arg(long)]
         csv: PathBuf,
+
+        /// CSV format.
+        #[arg(long, value_enum)]
+        format: Option<CsvOverlayFormat>,
+
+        /// CSV delimiter.
+        #[arg(long)]
+        delimiter: Option<char>,
 
         /// Target known planets table.
         #[arg(long, default_value = "planets")]
@@ -105,15 +120,7 @@ pub enum CsvCommand {
         #[arg(long, default_value = "planets_unknown")]
         unknown_table: String,
 
-        /// CSV format: auto, official, full.
-        #[arg(long, default_value = "auto")]
-        format: CsvOverlayFormat,
-
-        /// CSV delimiter. If omitted, it is detected from the header.
-        #[arg(long)]
-        delimiter: Option<String>,
-
-        /// Mark DB records not present in the CSV as deleted/skipped.
+        /// Mark DB rows not represented by the CSV overlay as deleted.
         #[arg(long, default_value_t = false)]
         mark_deleted: bool,
 

@@ -102,7 +102,9 @@ async fn main() -> Result<()> {
 
         Commands::Csv(command) => match command {
             CsvCommand::Overlay {
+                driver,
                 db,
+                db_config,
                 csv,
                 table,
                 unknown_table,
@@ -113,7 +115,9 @@ async fn main() -> Result<()> {
             } => {
                 let delimiter = parse_delimiter(delimiter)?;
                 let stats = apply_csv_overlay(&CsvOverlayOptions {
+                    driver,
                     db,
+                    db_config,
                     csv,
                     table,
                     unknown_table,
@@ -182,19 +186,10 @@ async fn main() -> Result<()> {
     }
 }
 
-fn parse_delimiter(value: Option<String>) -> Result<Option<u8>> {
-    let Some(value) = value else {
+fn parse_delimiter(value: Option<char>) -> Result<Option<u8>> {
+    let Some(ch) = value else {
         return Ok(None);
     };
-
-    let mut chars = value.chars();
-    let Some(ch) = chars.next() else {
-        bail!("CSV delimiter cannot be empty");
-    };
-
-    if chars.next().is_some() {
-        bail!("CSV delimiter must be a single character");
-    }
 
     if !ch.is_ascii() {
         bail!("CSV delimiter must be an ASCII character");

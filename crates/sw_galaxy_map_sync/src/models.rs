@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
 
 /// Normalized planet record produced from ArcGIS attributes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +108,16 @@ impl std::str::FromStr for CsvOverlayFormat {
             "official" => Ok(Self::Official),
             "full" => Ok(Self::Full),
             other => anyhow::bail!("Unsupported CSV overlay format: {other}"),
+        }
+    }
+}
+
+impl fmt::Display for CsvOverlayFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CsvOverlayFormat::Auto => write!(f, "auto"),
+            CsvOverlayFormat::Official => write!(f, "official"),
+            CsvOverlayFormat::Full => write!(f, "full"),
         }
     }
 }
