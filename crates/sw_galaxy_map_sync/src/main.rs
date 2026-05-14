@@ -1,10 +1,11 @@
 use anyhow::{Result, bail};
 use clap::Parser;
-use sw_galaxy_map_sync::cli::{ArcgisCommand, Cli, Commands, CsvCommand, DbCommands};
+use sw_galaxy_map_sync::cli::{ArcgisCommand, Cli, Commands, CsvCommand, DbCommands, DbDriverArg};
 use sw_galaxy_map_sync::db::config::load_db_config;
 use sw_galaxy_map_sync::db::postgres;
 use sw_galaxy_map_sync::pipeline::arcgis_import::{
-    ArcgisFetchOptions, ArcgisImportOptions, fetch_arcgis_to_file, import_arcgis_to_sqlite,
+    ArcgisFetchOptions, ArcgisImportOptions, fetch_arcgis_to_file, import_arcgis_to_postgres,
+    import_arcgis_to_sqlite,
 };
 use sw_galaxy_map_sync::pipeline::csv_overlay::{CsvOverlayOptions, apply_csv_overlay};
 
@@ -25,36 +26,80 @@ async fn main() -> Result<()> {
             }),
 
             ArcgisCommand::Import {
+                driver,
                 db,
+                db_config,
                 table,
                 unknown_table,
                 page_size,
                 dry_run,
-            } => {
-                let result = import_arcgis_to_sqlite(&ArcgisImportOptions {
-                    db,
-                    table,
-                    unknown_table,
-                    page_size,
-                    dry_run,
-                })?;
+            } => match driver {
+                DbDriverArg::Sqlite => {
+                    let db =
+                        db.ok_or_else(|| anyhow::anyhow!("--db is required when --driver sqlite"))?;
 
-                println!();
-                println!("ArcGIS import completed.");
-                println!("Fetched          : {}", result.fetched);
-                println!("Known records    : {}", result.known);
-                println!("Unknown records  : {}", result.unknown);
-                println!("Known inserted   : {}", result.inserted);
-                println!("Known updated    : {}", result.updated);
-                println!("Known skipped    : {}", result.skipped);
-                println!("Unknown inserted : {}", result.unknown_inserted);
-                println!("Unknown updated  : {}", result.unknown_updated);
-                println!("Unknown skipped  : {}", result.unknown_skipped);
-                println!("Dry run          : {}", result.dry_run);
+                    let result = tokio::task::spawn_blocking(move || {
+                        import_arcgis_to_sqlite(&ArcgisImportOptions {
+                            db,
+                            table,
+                            unknown_table,
+                            page_size,
+                            dry_run,
+                        })
+                    })
+                    .await??;
 
-                Ok(())
-            }
+                    println!();
+                    println!("ArcGIS import completed.");
+                    println!("Backend          : sqlite");
+                    println!("Fetched          : {}", result.fetched);
+                    println!("Known records    : {}", result.known);
+                    println!("Unknown records  : {}", result.unknown);
+                    println!("Known inserted   : {}", result.inserted);
+                    println!("Known updated    : {}", result.updated);
+                    println!("Known skipped    : {}", result.skipped);
+                    println!("Unknown inserted : {}", result.unknown_inserted);
+                    println!("Unknown updated  : {}", result.unknown_updated);
+                    println!("Unknown skipped  : {}", result.unknown_skipped);
+                    println!("Dry run          : {}", result.dry_run);
+
+                    Ok(())
+                }
+
+                DbDriverArg::Postgres => {
+                    let db_config = db_config.ok_or_else(|| {
+                        anyhow::anyhow!("--db-config is required when --driver postgres")
+                    })?;
+
+                    let cfg = load_db_config(&db_config)?;
+
+                    let result =
+                        import_arcgis_to_postgres(&cfg, table, unknown_table, page_size, dry_run)
+                            .await?;
+
+                    println!();
+                    println!("ArcGIS import completed.");
+                    println!("Backend          : postgres");
+                    println!("Fetched          : {}", result.fetched);
+                    println!("Known records    : {}", result.known);
+                    println!("Unknown records  : {}", result.unknown);
+                    println!("Known inserted   : {}", result.inserted);
+                    println!("Known updated    : {}", result.updated);
+                    println!("Known skipped    : {}", result.skipped);
+                    println!("Unknown inserted : {}", result.unknown_inserted);
+                    println!("Unknown updated  : {}", result.unknown_updated);
+                    println!("Unknown skipped  : {}", result.unknown_skipped);
+                    println!("Dry run          : {}", result.dry_run);
+
+                    Ok(())
+                }
+
+                DbDriverArg::Mysql => {
+                    bail!("MySQL backend is not implemented yet");
+                }
+            },
         },
+
         Commands::Csv(command) => match command {
             CsvCommand::Overlay {
                 db,

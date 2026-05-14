@@ -1,7 +1,14 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::models::CsvOverlayFormat;
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DbDriverArg {
+    Sqlite,
+    Postgres,
+    Mysql,
+}
 
 /// ArcGIS-first synchronization and ingestion tool.
 #[derive(Debug, Parser)]
@@ -47,9 +54,17 @@ pub enum ArcgisCommand {
 
     /// Download ArcGIS data and import/upsert it into SQLite.
     Import {
+        /// Database backend driver.
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
         /// SQLite database path.
         #[arg(long)]
-        db: PathBuf,
+        db: Option<PathBuf>,
+
+        /// JSON database configuration for remote backends.
+        #[arg(long)]
+        db_config: Option<PathBuf>,
 
         /// Target known planets table.
         #[arg(long, default_value = "planets")]

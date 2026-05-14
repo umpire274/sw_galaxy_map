@@ -1,9 +1,14 @@
-use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
+use crate::db::config::DbConfig;
+use crate::db::postgres::{
+    bootstrap_schema, build_postgres_url, upsert_known_arcgis_planet, upsert_unknown_arcgis_planet,
+};
+use crate::db::sqlite::{ensure_required_schema, upsert_meta_json, SqlitePlanetRepository};
 use crate::models::{ArcgisImportResult, UpsertOutcome};
 use crate::sources::arcgis::fetch_arcgis_dataset;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde_json::json;
+use sqlx::{Connection as SqlxConnection, PgConnection};
 use std::fs;
 use std::path::PathBuf;
 
@@ -128,6 +133,54 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
         });
 
         upsert_meta_json(&conn, "sync.arcgis.last_run", &meta)?;
+    }
+
+    Ok(result)
+}
+
+/// Fetch ArcGIS planets and import/upsert them into PostgreSQL.
+pub async fn import_arcgis_to_postgres(
+    cfg: &DbConfig,
+    _table: String,
+    _unknown_table: String,
+    page_size: i64,
+    dry_run: bool,
+) -> Result<ArcgisImportResult> {
+    let dataset = tokio::task::spawn_blocking(move || fetch_arcgis_dataset(page_size)).await??;
+
+    let mut result = ArcgisImportResult {
+        fetched: dataset.len(),
+        known: dataset.known.len(),
+        unknown: dataset.unknown.len(),
+        dry_run,
+        ..ArcgisImportResult::default()
+    };
+
+    if dry_run {
+        result.skipped = dataset.known.len();
+        result.unknown_skipped = dataset.unknown.len();
+        return Ok(result);
+    }
+
+    bootstrap_schema(cfg).await?;
+
+    let url = build_postgres_url(cfg)?;
+    let mut conn = PgConnection::connect(&url).await?;
+
+    for planet in &dataset.known {
+        match upsert_known_arcgis_planet(&mut conn, planet).await? {
+            UpsertOutcome::Inserted => result.inserted += 1,
+            UpsertOutcome::Updated => result.updated += 1,
+            UpsertOutcome::Skipped => result.skipped += 1,
+        }
+    }
+
+    for planet in &dataset.unknown {
+        match upsert_unknown_arcgis_planet(&mut conn, planet).await? {
+            UpsertOutcome::Inserted => result.unknown_inserted += 1,
+            UpsertOutcome::Updated => result.unknown_updated += 1,
+            UpsertOutcome::Skipped => result.unknown_skipped += 1,
+        }
     }
 
     Ok(result)
