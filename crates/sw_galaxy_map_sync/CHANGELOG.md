@@ -5,6 +5,17 @@ All notable changes to `sw_galaxy_map_sync` will be documented in this file.
 The format is based on Keep a Changelog
 and this project follows Semantic Versioning.
 
+## [0.4.1] - 2026-05-15
+
+### Fixed
+
+- wrap PostgreSQL CSV overlay operations in a single transaction
+- prevent partially applied overlay states on synchronization failures
+- align PostgreSQL overlay atomicity with SQLite backend behavior
+- include delete reconciliation and metadata persistence inside transactional execution
+
+---
+
 ## [0.4.0] - 2026-05-13
 
 ### Added
