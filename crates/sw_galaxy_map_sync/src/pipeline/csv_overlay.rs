@@ -1,7 +1,7 @@
 use crate::cli::DbDriverArg;
 use crate::db::config::load_db_config;
 use crate::db::postgres::{
-    apply_csv_overlay_row_postgres, build_postgres_url, count_postgres_planet_rows,
+    apply_csv_overlay_row_postgres, build_postgres_connect_options, count_postgres_planet_rows,
     mark_deleted_not_in_csv_postgres, upsert_meta_struct,
 };
 use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
@@ -201,8 +201,8 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
         ..CsvOverlayStats::default()
     };
 
-    let url = build_postgres_url(&cfg)?;
-    let mut conn = PgConnection::connect(&url).await?;
+    let db_options = build_postgres_connect_options(&cfg)?;
+    let mut conn = PgConnection::connect_with(&db_options).await?;
 
     crate::db::schema::postgres::create_postgres_schema(&mut conn).await?;
 

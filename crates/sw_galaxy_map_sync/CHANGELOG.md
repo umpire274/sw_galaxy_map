@@ -13,6 +13,9 @@ and this project follows Semantic Versioning.
 - prevent partially applied overlay states on synchronization failures
 - align PostgreSQL overlay atomicity with SQLite backend behavior
 - include delete reconciliation and metadata persistence inside transactional execution
+- replace raw PostgreSQL DSN string interpolation with `PgConnectOptions`
+- correctly support PostgreSQL credentials containing reserved URL characters
+- improve robustness of PostgreSQL backend configuration handling
 
 ---
 
