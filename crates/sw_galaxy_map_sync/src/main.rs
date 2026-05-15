@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use clap::Parser;
 use sw_galaxy_map_sync::cli::{
-    ArcgisCommand, Cli, Commands, ConvertCommands, CsvCommand, DbCommands, DbDriverArg,
+    ArcgisCommand, Cli, Commands, ConvertCommands, CoordinateUnitArg, CsvCommand, DbCommands,
+    DbDriverArg,
 };
 use sw_galaxy_map_sync::db::config::load_db_config;
 use sw_galaxy_map_sync::db::postgres;
@@ -13,7 +14,8 @@ use sw_galaxy_map_sync::pipeline::convert_coordinates::{
     ConvertCoordinatesOptions, print_convert_coordinates_summary,
 };
 use sw_galaxy_map_sync::pipeline::convert_coordinates::{
-    convert_coordinates_postgres, convert_coordinates_sqlite,
+    convert_coordinates_postgres, convert_coordinates_sqlite, print_convert_rollback_summary,
+    rollback_coordinates_sqlite,
 };
 use sw_galaxy_map_sync::pipeline::csv_overlay::{
     CsvOverlayOptions, apply_csv_overlay, apply_csv_overlay_postgres,
@@ -257,6 +259,37 @@ async fn main() -> Result<()> {
                         let stats = convert_coordinates_postgres(&options).await?;
                         print_convert_coordinates_summary(&stats);
                         Ok(())
+                    }
+
+                    DbDriverArg::Mysql => {
+                        anyhow::bail!("MySQL backend is not implemented yet")
+                    }
+                }
+            }
+
+            ConvertCommands::Rollback {
+                driver,
+                db,
+                db_config,
+                dry_run,
+            } => {
+                let options = ConvertCoordinatesOptions {
+                    driver,
+                    db,
+                    db_config,
+                    to: CoordinateUnitArg::Pc, // non usato dal rollback
+                    dry_run,
+                };
+
+                match driver {
+                    DbDriverArg::Sqlite => {
+                        let stats = rollback_coordinates_sqlite(&options)?;
+                        print_convert_rollback_summary(&stats);
+                        Ok(())
+                    }
+
+                    DbDriverArg::Postgres => {
+                        anyhow::bail!("PostgreSQL coordinate rollback is not implemented yet")
                     }
 
                     DbDriverArg::Mysql => {

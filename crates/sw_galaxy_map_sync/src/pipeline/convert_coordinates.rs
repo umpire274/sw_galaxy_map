@@ -20,6 +20,22 @@ pub struct ConvertCoordinatesStats {
     pub dry_run: bool,
 }
 
+#[derive(Debug, Clone)]
+struct CoordinateBackupEntry {
+    index: usize,
+    backup_timestamp: String,
+    rows: usize,
+    grid_unit: String,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ConvertRollbackStats {
+    pub rows_restored: usize,
+    pub backup_timestamp: String,
+    pub grid_unit: String,
+    pub dry_run: bool,
+}
+
 pub const PC_TO_LY: f64 = 3.26156;
 
 pub fn round_2(value: f64) -> f64 {
@@ -139,8 +155,8 @@ pub fn convert_coordinates_sqlite(
 
 pub async fn convert_coordinates_postgres(
     _options: &ConvertCoordinatesOptions,
-) -> anyhow::Result<ConvertCoordinatesStats> {
-    anyhow::bail!("PostgreSQL coordinate conversion is not implemented yet")
+) -> Result<ConvertCoordinatesStats> {
+    bail!("PostgreSQL coordinate conversion is not implemented yet")
 }
 
 pub fn print_convert_coordinates_summary(stats: &ConvertCoordinatesStats) {
@@ -152,4 +168,184 @@ pub fn print_convert_coordinates_summary(stats: &ConvertCoordinatesStats) {
     println!("From unit        : {}", stats.from_unit);
     println!("To unit          : {}", stats.to_unit);
     println!("Dry run          : {}", stats.dry_run);
+}
+
+pub fn print_convert_rollback_summary(stats: &ConvertRollbackStats) {
+    println!();
+    println!("Coordinate rollback completed.");
+    println!("Backup timestamp : {}", stats.backup_timestamp);
+    println!("Rows restored    : {}", stats.rows_restored);
+    println!("Grid unit        : {}", stats.grid_unit);
+    println!("Dry run          : {}", stats.dry_run);
+}
+
+use std::io::{self, Write};
+
+pub fn rollback_coordinates_sqlite(
+    options: &ConvertCoordinatesOptions,
+) -> Result<ConvertRollbackStats> {
+    let db_path = options
+        .db
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--db is required when --driver sqlite"))?;
+
+    let mut conn = Connection::open(db_path)
+        .with_context(|| format!("Unable to open SQLite DB: {}", db_path.display()))?;
+
+    ensure_backup_table_exists_sqlite(&conn)?;
+
+    let backups = load_coordinate_backups_sqlite(&conn)?;
+
+    if backups.is_empty() {
+        bail!("No coordinate backups found.");
+    }
+
+    println!();
+    println!("Available coordinate backups:");
+    println!();
+
+    for backup in &backups {
+        println!(
+            "[{}] {} - {} rows - {}",
+            backup.index, backup.backup_timestamp, backup.rows, backup.grid_unit
+        );
+    }
+
+    println!();
+    print!("Select backup to restore: ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    let selected_index: usize = input.trim().parse().context("Invalid backup selection")?;
+
+    let selected = backups
+        .iter()
+        .find(|entry| entry.index == selected_index)
+        .ok_or_else(|| anyhow::anyhow!("Selected backup does not exist"))?;
+
+    println!();
+    println!(
+        "This will restore {} coordinate rows from backup timestamp {}.",
+        selected.rows, selected.backup_timestamp
+    );
+    println!("Target grid_unit: {}", selected.grid_unit);
+    print!("Continue? [y/N]: ");
+    io::stdout().flush()?;
+
+    let mut confirm = String::new();
+    io::stdin().read_line(&mut confirm)?;
+
+    if !confirm.trim().eq_ignore_ascii_case("y") {
+        bail!("Rollback cancelled.");
+    }
+
+    if options.dry_run {
+        return Ok(ConvertRollbackStats {
+            rows_restored: selected.rows,
+            backup_timestamp: selected.backup_timestamp.clone(),
+            grid_unit: selected.grid_unit.clone(),
+            dry_run: true,
+        });
+    }
+
+    let tx = conn.transaction()?;
+
+    let restored = tx.execute(
+        r#"
+        UPDATE planets
+        SET
+            X = (
+                SELECT b.X
+                FROM planets_coordinates_backup b
+                WHERE b.fid = planets.FID
+                  AND b.backup_timestamp = ?1
+            ),
+            Y = (
+                SELECT b.Y
+                FROM planets_coordinates_backup b
+                WHERE b.fid = planets.FID
+                  AND b.backup_timestamp = ?1
+            ),
+            grid_unit = (
+                SELECT b.grid_unit
+                FROM planets_coordinates_backup b
+                WHERE b.fid = planets.FID
+                  AND b.backup_timestamp = ?1
+            )
+        WHERE EXISTS (
+            SELECT 1
+            FROM planets_coordinates_backup b
+            WHERE b.fid = planets.FID
+              AND b.backup_timestamp = ?1
+        )
+        "#,
+        params![selected.backup_timestamp],
+    )?;
+
+    tx.commit()?;
+
+    Ok(ConvertRollbackStats {
+        rows_restored: restored,
+        backup_timestamp: selected.backup_timestamp.clone(),
+        grid_unit: selected.grid_unit.clone(),
+        dry_run: false,
+    })
+}
+
+fn ensure_backup_table_exists_sqlite(conn: &Connection) -> Result<()> {
+    let exists: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'planets_coordinates_backup'
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+
+    if exists == 0 {
+        bail!("Backup table 'planets_coordinates_backup' does not exist.");
+    }
+
+    Ok(())
+}
+
+fn load_coordinate_backups_sqlite(conn: &Connection) -> Result<Vec<CoordinateBackupEntry>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            backup_timestamp,
+            COUNT(*) AS rows_count,
+            COALESCE(MIN(grid_unit), '') AS grid_unit
+        FROM planets_coordinates_backup
+        GROUP BY backup_timestamp
+        ORDER BY backup_timestamp DESC
+        "#,
+    )?;
+
+    let mut backups = Vec::new();
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+
+    for (idx, row) in rows.enumerate() {
+        let (backup_timestamp, rows_count, grid_unit) = row?;
+
+        backups.push(CoordinateBackupEntry {
+            index: idx + 1,
+            backup_timestamp,
+            rows: rows_count as usize,
+            grid_unit,
+        });
+    }
+
+    Ok(backups)
 }
