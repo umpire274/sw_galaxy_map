@@ -23,7 +23,7 @@ indicatif.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
-sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
+sw_galaxy_map_core = { version = "0.15.2", path = "../sw_galaxy_map_core" }
 
 sqlx = { version = "0.8.6", default-features = false, features = [
     "postgres",
