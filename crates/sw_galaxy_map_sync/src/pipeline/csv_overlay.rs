@@ -1,7 +1,7 @@
 use crate::cli::DbDriverArg;
 use crate::db::config::load_db_config;
 use crate::db::postgres::{
-    apply_csv_overlay_row_postgres, build_postgres_url, count_postgres_planet_rows,
+    apply_csv_overlay_row_postgres, build_postgres_connect_options, count_postgres_planet_rows,
     mark_deleted_not_in_csv_postgres, upsert_meta_struct,
 };
 use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
@@ -201,10 +201,12 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
         ..CsvOverlayStats::default()
     };
 
-    let url = build_postgres_url(&cfg)?;
-    let mut conn = PgConnection::connect(&url).await?;
+    let db_options = build_postgres_connect_options(&cfg)?;
+    let mut conn = PgConnection::connect_with(&db_options).await?;
 
     crate::db::schema::postgres::create_postgres_schema(&mut conn).await?;
+
+    let mut tx = conn.begin().await?;
 
     println!();
     let pb = import_progress_bar(
@@ -217,7 +219,7 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
     )?;
 
     for row in &rows {
-        match apply_csv_overlay_row_postgres(&mut conn, row, options.dry_run, Some(&pb)).await? {
+        match apply_csv_overlay_row_postgres(&mut tx, row, options.dry_run, Some(&pb)).await? {
             CsvOverlayOutcome::Inserted => stats.inserted += 1,
             CsvOverlayOutcome::Active => stats.active += 1,
             CsvOverlayOutcome::ModifiedExact => stats.modified_exact += 1,
@@ -233,7 +235,7 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
     println!();
 
     if options.mark_deleted {
-        let db_rows_count = count_postgres_planet_rows(&mut conn).await?;
+        let db_rows_count = count_postgres_planet_rows(&mut tx).await?;
 
         let delete_pb = import_progress_bar(
             db_rows_count,
@@ -245,7 +247,7 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
         )?;
 
         let (deleted, skipped) =
-            mark_deleted_not_in_csv_postgres(&mut conn, &rows, options.dry_run, Some(&delete_pb))
+            mark_deleted_not_in_csv_postgres(&mut tx, &rows, options.dry_run, Some(&delete_pb))
                 .await?;
 
         delete_pb.finish_with_message(if options.dry_run {
@@ -285,8 +287,9 @@ pub async fn apply_csv_overlay_postgres(options: &CsvOverlayOptions) -> Result<C
             "dry_run": stats.dry_run,
         });
 
-        upsert_meta_struct(&mut conn, "sync.csv_overlay.postgresql", &meta).await?;
+        upsert_meta_struct(&mut tx, "sync.csv_overlay.postgresql", &meta).await?;
     }
 
+    tx.commit().await?;
     Ok(stats)
 }

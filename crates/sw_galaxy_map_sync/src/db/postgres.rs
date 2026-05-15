@@ -6,8 +6,9 @@ use crate::models::{CsvOverlayOutcome, CsvOverlayRow, PlanetDbRow};
 use crate::models::{NormalizedPlanet, UpsertOutcome};
 use crate::utils::{cmp_key, same_overlay_fields, strip_roman_suffix};
 use indicatif::ProgressBar;
+use sqlx::postgres::PgConnectOptions;
 
-pub(crate) fn build_postgres_url(cfg: &DbConfig) -> Result<String> {
+pub fn build_postgres_connect_options(cfg: &DbConfig) -> Result<PgConnectOptions> {
     let username = cfg
         .username
         .as_deref()
@@ -26,15 +27,17 @@ pub(crate) fn build_postgres_url(cfg: &DbConfig) -> Result<String> {
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("PostgreSQL database is required"))?;
 
-    Ok(format!(
-        "postgres://{username}:{password}@{host}:{port}/{database}"
-    ))
+    Ok(PgConnectOptions::new()
+        .host(host)
+        .port(port)
+        .username(username)
+        .password(password)
+        .database(database))
 }
 
 pub async fn test_connection(cfg: &DbConfig) -> Result<()> {
-    let url = build_postgres_url(cfg)?;
-
-    let mut conn = PgConnection::connect(&url).await?;
+    let db_options = build_postgres_connect_options(cfg)?;
+    let mut conn = PgConnection::connect_with(&db_options).await?;
 
     let version: (String,) = sqlx::query_as("SELECT version()")
         .fetch_one(&mut conn)
@@ -52,8 +55,8 @@ pub async fn test_connection(cfg: &DbConfig) -> Result<()> {
 /// This is the PostgreSQL equivalent of the SQLite schema baseline used by
 /// the sync pipeline.
 pub async fn bootstrap_schema(cfg: &DbConfig) -> Result<()> {
-    let url = build_postgres_url(cfg)?;
-    let mut conn = PgConnection::connect(&url).await?;
+    let db_options = build_postgres_connect_options(cfg)?;
+    let mut conn = PgConnection::connect_with(&db_options).await?;
 
     crate::db::schema::postgres::create_postgres_schema(&mut conn).await?;
 

@@ -1,6 +1,7 @@
 use crate::db::config::DbConfig;
 use crate::db::postgres::{
-    bootstrap_schema, build_postgres_url, upsert_known_arcgis_planet, upsert_unknown_arcgis_planet,
+    bootstrap_schema, build_postgres_connect_options, upsert_known_arcgis_planet,
+    upsert_unknown_arcgis_planet,
 };
 use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema};
 use crate::models::ArcgisImportMeta;
@@ -180,8 +181,8 @@ pub async fn import_arcgis_to_postgres(
 
     bootstrap_schema(cfg).await?;
 
-    let url = build_postgres_url(cfg)?;
-    let mut conn = PgConnection::connect(&url).await?;
+    let db_options = build_postgres_connect_options(cfg)?;
+    let mut conn = PgConnection::connect_with(&db_options).await?;
 
     println!();
     let pb = import_progress_bar(dataset.len(), "Importing ArcGIS records into PostgreSQL...")?;
