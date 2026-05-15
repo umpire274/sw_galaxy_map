@@ -27,7 +27,8 @@ sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
 
 sqlx = { version = "0.8.6", default-features = false, features = [
     "postgres",
-    "runtime-tokio"
+    "runtime-tokio",
+    "derive"
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 

@@ -9,7 +9,8 @@ pub fn import_progress_bar(
 
     pb.set_style(
         ProgressStyle::with_template(
-            "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+            "{spinner:.green} [{elapsed_precise}] [{bar:30.cyan/blue}] \
+                        {pos}/{len} ({percent:>3}%) ETA:{eta_precise} {msg}",
         )?
         .progress_chars("#>-"),
     );

@@ -7,7 +7,9 @@ use sw_galaxy_map_sync::pipeline::arcgis_import::{
     ArcgisFetchOptions, ArcgisImportOptions, fetch_arcgis_to_file, import_arcgis_to_postgres,
     import_arcgis_to_sqlite,
 };
-use sw_galaxy_map_sync::pipeline::csv_overlay::{CsvOverlayOptions, apply_csv_overlay};
+use sw_galaxy_map_sync::pipeline::csv_overlay::{
+    CsvOverlayOptions, apply_csv_overlay, apply_csv_overlay_postgres,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -112,34 +114,69 @@ async fn main() -> Result<()> {
                 delimiter,
                 mark_deleted,
                 dry_run,
-            } => {
-                let delimiter = parse_delimiter(delimiter)?;
-                let stats = apply_csv_overlay(&CsvOverlayOptions {
-                    driver,
-                    db,
-                    db_config,
-                    csv,
-                    table,
-                    unknown_table,
-                    format,
-                    delimiter,
-                    dry_run,
-                    mark_deleted,
-                })?;
+            } => match driver {
+                DbDriverArg::Sqlite => {
+                    let delimiter = parse_delimiter(delimiter)?;
+                    let stats = apply_csv_overlay(&CsvOverlayOptions {
+                        driver,
+                        db,
+                        db_config,
+                        csv,
+                        table,
+                        unknown_table,
+                        format,
+                        delimiter,
+                        dry_run,
+                        mark_deleted,
+                    })?;
 
-                println!();
-                println!("CSV overlay completed.");
-                println!("Rows read        : {}", stats.rows_read);
-                println!("Inserted         : {}", stats.inserted);
-                println!("Active           : {}", stats.active);
-                println!("Modified exact   : {}", stats.modified_exact);
-                println!("Modified suffix  : {}", stats.modified_suffix);
-                println!("Deleted          : {}", stats.deleted);
-                println!("Skipped          : {}", stats.skipped);
-                println!("Dry run          : {}", stats.dry_run);
+                    println!();
+                    println!("CSV overlay completed.");
+                    println!("Rows read        : {}", stats.rows_read);
+                    println!("Inserted         : {}", stats.inserted);
+                    println!("Active           : {}", stats.active);
+                    println!("Modified exact   : {}", stats.modified_exact);
+                    println!("Modified suffix  : {}", stats.modified_suffix);
+                    println!("Deleted          : {}", stats.deleted);
+                    println!("Skipped          : {}", stats.skipped);
+                    println!("Dry run          : {}", stats.dry_run);
 
-                Ok(())
-            }
+                    Ok(())
+                }
+                DbDriverArg::Postgres => {
+                    let delimiter = parse_delimiter(delimiter)?;
+                    let stats = apply_csv_overlay_postgres(&CsvOverlayOptions {
+                        driver,
+                        db,
+                        db_config,
+                        csv,
+                        table,
+                        unknown_table,
+                        format,
+                        delimiter,
+                        dry_run,
+                        mark_deleted,
+                    })
+                    .await?;
+
+                    println!();
+                    println!("CSV overlay completed.");
+                    println!("Rows read        : {}", stats.rows_read);
+                    println!("Inserted         : {}", stats.inserted);
+                    println!("Active           : {}", stats.active);
+                    println!("Modified exact   : {}", stats.modified_exact);
+                    println!("Modified suffix  : {}", stats.modified_suffix);
+                    println!("Deleted          : {}", stats.deleted);
+                    println!("Skipped          : {}", stats.skipped);
+                    println!("Dry run          : {}", stats.dry_run);
+
+                    Ok(())
+                }
+
+                DbDriverArg::Mysql => {
+                    bail!("MySQL backend is not implemented yet");
+                }
+            },
         },
         Commands::Db(command) => match command {
             DbCommands::Test { db_config } => {

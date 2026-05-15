@@ -132,7 +132,7 @@ pub struct CsvOverlayRow {
 }
 
 /// One database row used by the CSV overlay matching phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PlanetDbRow {
     pub fid: i64,
     pub planet: String,
