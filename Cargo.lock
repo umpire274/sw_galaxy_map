@@ -4660,7 +4660,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "sw_galaxy_map_core",
  "tokio",
 ]
 
