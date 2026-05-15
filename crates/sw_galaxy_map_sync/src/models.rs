@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
 
 /// Normalized planet record produced from ArcGIS attributes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +112,16 @@ impl std::str::FromStr for CsvOverlayFormat {
     }
 }
 
+impl fmt::Display for CsvOverlayFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CsvOverlayFormat::Auto => write!(f, "auto"),
+            CsvOverlayFormat::Official => write!(f, "official"),
+            CsvOverlayFormat::Full => write!(f, "full"),
+        }
+    }
+}
+
 /// One normalized row read from a CSV overlay source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsvOverlayRow {
@@ -121,7 +132,7 @@ pub struct CsvOverlayRow {
 }
 
 /// One database row used by the CSV overlay matching phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PlanetDbRow {
     pub fid: i64,
     pub planet: String,
@@ -150,5 +161,23 @@ pub struct CsvOverlayStats {
     pub modified_suffix: usize,
     pub deleted: usize,
     pub skipped: usize,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArcgisImportMeta<'a> {
+    pub crate_version: &'a str,
+    pub operation: &'a str,
+    pub backend: &'a str,
+    pub completed_at_utc: String,
+    pub fetched: usize,
+    pub known: usize,
+    pub unknown: usize,
+    pub known_inserted: usize,
+    pub known_updated: usize,
+    pub known_skipped: usize,
+    pub unknown_inserted: usize,
+    pub unknown_updated: usize,
+    pub unknown_skipped: usize,
     pub dry_run: bool,
 }

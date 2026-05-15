@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_sync"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "ArcGIS-first synchronization and ingestion tool for the Star Wars galaxy map and Astronavis datasets"
@@ -24,6 +24,13 @@ regex.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
 sw_galaxy_map_core = { path = "../sw_galaxy_map_core" }
+
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "postgres",
+    "runtime-tokio",
+    "derive"
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [lib]
 name = "sw_galaxy_map_sync"

@@ -1,7 +1,13 @@
-use clap::{Parser, Subcommand};
+use crate::models::CsvOverlayFormat;
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::models::CsvOverlayFormat;
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DbDriverArg {
+    Sqlite,
+    Postgres,
+    Mysql,
+}
 
 /// ArcGIS-first synchronization and ingestion tool.
 #[derive(Debug, Parser)]
@@ -21,6 +27,10 @@ pub enum Commands {
     /// CSV overlay commands.
     #[command(subcommand)]
     Csv(CsvCommand),
+
+    /// Database Operations commands.
+    #[command(subcommand)]
+    Db(DbCommands),
 }
 
 /// ArcGIS command group.
@@ -43,9 +53,17 @@ pub enum ArcgisCommand {
 
     /// Download ArcGIS data and import/upsert it into SQLite.
     Import {
+        /// Database backend driver.
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
         /// SQLite database path.
         #[arg(long)]
-        db: PathBuf,
+        db: Option<PathBuf>,
+
+        /// JSON database configuration for remote backends.
+        #[arg(long)]
+        db_config: Option<PathBuf>,
 
         /// Target known planets table.
         #[arg(long, default_value = "planets")]
@@ -70,13 +88,29 @@ pub enum ArcgisCommand {
 pub enum CsvCommand {
     /// Apply a curated CSV overlay over the ArcGIS baseline.
     Overlay {
+        /// Database backend driver.
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
         /// SQLite database path.
         #[arg(long)]
-        db: PathBuf,
+        db: Option<PathBuf>,
 
-        /// CSV overlay file.
+        /// JSON database configuration for remote backends.
+        #[arg(long)]
+        db_config: Option<PathBuf>,
+
+        /// CSV input path.
         #[arg(long)]
         csv: PathBuf,
+
+        /// CSV format.
+        #[arg(long, value_enum)]
+        format: Option<CsvOverlayFormat>,
+
+        /// CSV delimiter.
+        #[arg(long)]
+        delimiter: Option<char>,
 
         /// Target known planets table.
         #[arg(long, default_value = "planets")]
@@ -86,20 +120,38 @@ pub enum CsvCommand {
         #[arg(long, default_value = "planets_unknown")]
         unknown_table: String,
 
-        /// CSV format: auto, official, full.
-        #[arg(long, default_value = "auto")]
-        format: CsvOverlayFormat,
-
-        /// CSV delimiter. If omitted, it is detected from the header.
-        #[arg(long)]
-        delimiter: Option<String>,
-
-        /// Mark DB records not present in the CSV as deleted/skipped.
+        /// Mark DB rows not represented by the CSV overlay as deleted.
         #[arg(long, default_value_t = false)]
         mark_deleted: bool,
 
         /// Run without applying database changes.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+    },
+}
+
+/// Enum representing commands for interacting with the database.
+///
+/// This enum is used to define the different commands that can be executed on the database.
+/// It contains a single variant called `Test`, which takes a database configuration path as an argument.
+/// The database configuration path is used to specify the location and settings of the database to be tested.
+/// The purpose of this command is to test the database connection and ensure that it is working correctly.
+/// It is important to note that this command should only be used for testing purposes and should not be used in a production environment.
+#[derive(Subcommand, Debug)]
+pub enum DbCommands {
+    Test {
+        #[arg(long)]
+        db_config: PathBuf,
+    },
+
+    Bootstrap {
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
+        #[arg(long)]
+        db: Option<PathBuf>,
+
+        #[arg(long)]
+        db_config: Option<PathBuf>,
     },
 }

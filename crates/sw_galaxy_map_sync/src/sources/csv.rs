@@ -8,12 +8,14 @@ use crate::utils::normalize_text;
 /// Load and normalize CSV overlay rows.
 pub fn load_overlay_csv(
     path: &Path,
-    format: CsvOverlayFormat,
+    format: Option<CsvOverlayFormat>,
     delimiter: Option<u8>,
 ) -> Result<Vec<CsvOverlayRow>> {
+    let requested_format = format.unwrap_or(CsvOverlayFormat::Auto);
+
     let delimiter = match delimiter {
         Some(value) => value,
-        None => detect_delimiter(path, format)?,
+        None => detect_delimiter(path, requested_format)?,
     };
 
     let mut rdr = ReaderBuilder::new()
@@ -23,7 +25,7 @@ pub fn load_overlay_csv(
         .with_context(|| format!("Unable to open CSV overlay file: {}", path.display()))?;
 
     let headers = rdr.headers()?.clone();
-    let detected_format = detect_format(&headers, format)?;
+    let detected_format = detect_format(&headers, requested_format)?;
     let mapping = CsvColumnMapping::from_headers(&headers, detected_format)?;
 
     let mut rows = Vec::new();

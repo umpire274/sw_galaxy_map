@@ -13,6 +13,14 @@ pub struct SqlitePlanetRepository<'conn> {
 }
 
 impl<'conn> SqlitePlanetRepository<'conn> {
+    pub fn count_planet_rows(&self) -> Result<usize> {
+        let sql = format!("SELECT COUNT(*) FROM {}", quote_ident(&self.table));
+        let count: i64 = self.conn.query_row(&sql, [], |row| row.get(0))?;
+        Ok(count as usize)
+    }
+}
+
+impl<'conn> SqlitePlanetRepository<'conn> {
     /// Create a new SQLite planet repository.
     pub fn new(conn: &'conn Connection, table: impl Into<String>) -> Self {
         Self {
@@ -75,6 +83,7 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         &self,
         csv_rows: &[CsvOverlayRow],
         dry_run: bool,
+        progress: Option<&indicatif::ProgressBar>,
     ) -> Result<(usize, usize)> {
         let db_rows = self.load_planet_rows()?;
         let mut deleted = 0usize;
@@ -93,6 +102,9 @@ impl<'conn> SqlitePlanetRepository<'conn> {
                 if !dry_run {
                     self.set_status(db_row.fid, "deleted")?;
                 }
+            }
+            if let Some(pb) = progress {
+                pb.inc(1);
             }
         }
 
@@ -201,9 +213,9 @@ impl<'conn> SqlitePlanetRepository<'conn> {
         let sql = format!(
             "INSERT INTO {}
                 (FID, Planet, planet_norm, Region, Sector, System, Grid, X, Y,
-                 arcgis_hash, deleted, Canon, Legends)
+                 arcgis_hash, deleted, Canon, Legends, grid_unit)
              VALUES
-                (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?12)",
+                (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?12, ?13)",
             quote_ident(&self.table)
         );
 
@@ -222,6 +234,7 @@ impl<'conn> SqlitePlanetRepository<'conn> {
                 planet.arcgis_hash,
                 planet.canon,
                 planet.legends,
+                "pc".to_string(),
             ],
         )?;
 
@@ -243,7 +256,8 @@ impl<'conn> SqlitePlanetRepository<'conn> {
                 arcgis_hash = ?10,
                 deleted = 0,
                 Canon = ?11,
-                Legends = ?12
+                Legends = ?12,
+                grid_unit = ?13
              WHERE FID = ?1",
             quote_ident(&self.table)
         );
@@ -263,6 +277,7 @@ impl<'conn> SqlitePlanetRepository<'conn> {
                 planet.arcgis_hash,
                 planet.canon,
                 planet.legends,
+                "pc".to_string(),
             ],
         )?;
 
@@ -373,37 +388,33 @@ pub fn ensure_required_schema(
         (true, true) => Ok(()),
 
         (false, _) => {
-            let enable_fts = sw_galaxy_map_core::db::provision::has_fts5(conn);
-            sw_galaxy_map_core::db::provision::create_schema(conn, enable_fts)?;
+            crate::db::schema::sqlite::create_sqlite_schema(conn)?;
 
             if !table_exists(conn, unknown_table)? {
                 create_table_like(conn, planets_table, unknown_table)?;
             }
 
             if persist_meta {
-                let mut created_tables = vec![
-                    "meta",
-                    "planets",
-                    "planets_unknown",
-                    "waypoints",
-                    "waypoint_planets",
-                    "routes",
-                    "route_detours",
-                    "route_waypoints",
-                    "planet_aliases",
-                    "planets_search",
-                ];
-
-                if enable_fts {
-                    created_tables.push("planets_fts");
-                }
-
                 let meta = json!({
                     "crate_version": env!("CARGO_PKG_VERSION"),
                     "operation": "schema_bootstrap",
                     "completed_at_utc": chrono::Utc::now().to_rfc3339(),
-                    "fts_enabled": enable_fts,
-                    "created_tables": created_tables,
+                    "schema_source": "sw_galaxy_map_sync",
+                    "schema_version": 13,
+                    "backend": "sqlite",
+                    "created_tables": [
+                        "meta",
+                        "planets",
+                        "planets_unknown",
+                        "waypoints",
+                        "waypoint_planets",
+                        "routes",
+                        "route_detours",
+                        "route_waypoints",
+                        "planet_aliases",
+                        "planet_search",
+                        "v_planets_clean"
+                    ]
                 });
 
                 upsert_meta_json(conn, "sync.schema.last_bootstrap", &meta)?;
@@ -532,4 +543,12 @@ pub fn upsert_meta_json(conn: &Connection, key: &str, value: &Value) -> Result<(
     )?;
 
     Ok(())
+}
+
+pub fn upsert_meta_struct<T>(conn: &Connection, key: &str, value: &T) -> Result<()>
+where
+    T: serde::Serialize,
+{
+    let json = serde_json::to_value(value)?;
+    upsert_meta_json(conn, key, &json)
 }

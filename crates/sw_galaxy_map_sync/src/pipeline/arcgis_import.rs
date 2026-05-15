@@ -1,9 +1,15 @@
-use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema, upsert_meta_json};
+use crate::db::config::DbConfig;
+use crate::db::postgres::{
+    bootstrap_schema, build_postgres_url, upsert_known_arcgis_planet, upsert_unknown_arcgis_planet,
+};
+use crate::db::sqlite::{SqlitePlanetRepository, ensure_required_schema};
+use crate::models::ArcgisImportMeta;
 use crate::models::{ArcgisImportResult, UpsertOutcome};
+use crate::progress::import_progress_bar;
 use crate::sources::arcgis::fetch_arcgis_dataset;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use serde_json::json;
+use sqlx::{Connection as SqlxConnection, PgConnection};
 use std::fs;
 use std::path::PathBuf;
 
@@ -56,6 +62,28 @@ pub fn fetch_arcgis_to_file(options: &ArcgisFetchOptions) -> Result<()> {
     Ok(())
 }
 
+fn build_arcgis_import_meta<'a>(
+    backend: &'a str,
+    result: &ArcgisImportResult,
+) -> ArcgisImportMeta<'a> {
+    ArcgisImportMeta {
+        crate_version: env!("CARGO_PKG_VERSION"),
+        operation: "arcgis_import",
+        backend,
+        completed_at_utc: chrono::Utc::now().to_rfc3339(),
+        fetched: result.fetched,
+        known: result.known,
+        unknown: result.unknown,
+        known_inserted: result.inserted,
+        known_updated: result.updated,
+        known_skipped: result.skipped,
+        unknown_inserted: result.unknown_inserted,
+        unknown_updated: result.unknown_updated,
+        unknown_skipped: result.unknown_skipped,
+        dry_run: result.dry_run,
+    }
+}
+
 /// Fetch ArcGIS planets and import/upsert them into SQLite.
 pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisImportResult> {
     let dataset = fetch_arcgis_dataset(options.page_size)?;
@@ -84,6 +112,9 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
         !options.dry_run,
     )?;
 
+    println!();
+    let pb = import_progress_bar(dataset.len(), "Importing ArcGIS records into SQLite...")?;
+
     let tx = conn.transaction()?;
     {
         let known_repo = SqlitePlanetRepository::new(&tx, &options.table);
@@ -98,6 +129,7 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
                 UpsertOutcome::Updated => result.updated += 1,
                 UpsertOutcome::Skipped => result.skipped += 1,
             }
+            pb.inc(1);
         }
 
         for planet in &dataset.unknown {
@@ -106,29 +138,78 @@ pub fn import_arcgis_to_sqlite(options: &ArcgisImportOptions) -> Result<ArcgisIm
                 UpsertOutcome::Updated => result.unknown_updated += 1,
                 UpsertOutcome::Skipped => result.unknown_skipped += 1,
             }
+            pb.inc(1);
         }
     }
     tx.commit()?;
 
-    if !options.dry_run {
-        let meta = json!({
-            "crate_version": env!("CARGO_PKG_VERSION"),
-            "operation": "arcgis_import",
-            "completed_at_utc": chrono::Utc::now().to_rfc3339(),
-            "fetched": result.fetched,
-            "known": result.known,
-            "unknown": result.unknown,
-            "known_inserted": result.inserted,
-            "known_updated": result.updated,
-            "known_skipped": result.skipped,
-            "unknown_inserted": result.unknown_inserted,
-            "unknown_updated": result.unknown_updated,
-            "unknown_skipped": result.unknown_skipped,
-            "dry_run": result.dry_run,
-        });
+    pb.finish_with_message("SQLite ArcGIS import completed.");
+    println!();
 
-        upsert_meta_json(&conn, "sync.arcgis.last_run", &meta)?;
+    if !options.dry_run {
+        let meta = build_arcgis_import_meta("sqlite", &result);
+        crate::db::sqlite::upsert_meta_struct(&conn, "sync.import.arcgis.sqlite", &meta)?;
     }
+
+    Ok(result)
+}
+
+/// Fetch ArcGIS planets and import/upsert them into PostgreSQL.
+pub async fn import_arcgis_to_postgres(
+    cfg: &DbConfig,
+    _table: String,
+    _unknown_table: String,
+    page_size: i64,
+    dry_run: bool,
+) -> Result<ArcgisImportResult> {
+    let dataset = tokio::task::spawn_blocking(move || fetch_arcgis_dataset(page_size)).await??;
+
+    let mut result = ArcgisImportResult {
+        fetched: dataset.len(),
+        known: dataset.known.len(),
+        unknown: dataset.unknown.len(),
+        dry_run,
+        ..ArcgisImportResult::default()
+    };
+
+    if dry_run {
+        result.skipped = dataset.known.len();
+        result.unknown_skipped = dataset.unknown.len();
+        return Ok(result);
+    }
+
+    bootstrap_schema(cfg).await?;
+
+    let url = build_postgres_url(cfg)?;
+    let mut conn = PgConnection::connect(&url).await?;
+
+    println!();
+    let pb = import_progress_bar(dataset.len(), "Importing ArcGIS records into PostgreSQL...")?;
+
+    for planet in &dataset.known {
+        match upsert_known_arcgis_planet(&mut conn, planet).await? {
+            UpsertOutcome::Inserted => result.inserted += 1,
+            UpsertOutcome::Updated => result.updated += 1,
+            UpsertOutcome::Skipped => result.skipped += 1,
+        }
+        pb.inc(1);
+    }
+
+    for planet in &dataset.unknown {
+        match upsert_unknown_arcgis_planet(&mut conn, planet).await? {
+            UpsertOutcome::Inserted => result.unknown_inserted += 1,
+            UpsertOutcome::Updated => result.unknown_updated += 1,
+            UpsertOutcome::Skipped => result.unknown_skipped += 1,
+        }
+        pb.inc(1);
+    }
+
+    pb.finish_with_message("PostgreSQL ArcGIS import completed.");
+    println!();
+
+    let meta = build_arcgis_import_meta("postgresql", &result);
+    crate::db::postgres::upsert_meta_struct(&mut conn, "sync.import.arcgis.postgresql", &meta)
+        .await?;
 
     Ok(result)
 }
