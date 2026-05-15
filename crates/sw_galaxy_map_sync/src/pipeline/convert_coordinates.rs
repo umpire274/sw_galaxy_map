@@ -42,8 +42,8 @@ pub fn round_2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, params};
+use anyhow::{bail, Context, Result};
+use rusqlite::{params, Connection};
 
 pub fn convert_coordinates_sqlite(
     options: &ConvertCoordinatesOptions,
@@ -96,6 +96,8 @@ pub fn convert_coordinates_sqlite(
 
     let backup_timestamp = chrono::Utc::now().to_rfc3339();
 
+    let pb = import_progress_bar(rows_checked as usize, "Converting SQLite coordinates...")?;
+
     let tx = conn.transaction()?;
 
     tx.execute_batch(
@@ -143,6 +145,9 @@ pub fn convert_coordinates_sqlite(
 
     tx.commit()?;
 
+    pb.inc(rows_checked as u64);
+    pb.finish_with_message("SQLite coordinate conversion completed.");
+
     Ok(ConvertCoordinatesStats {
         rows_checked: rows_checked as usize,
         rows_converted: converted,
@@ -179,6 +184,7 @@ pub fn print_convert_rollback_summary(stats: &ConvertRollbackStats) {
     println!("Dry run          : {}", stats.dry_run);
 }
 
+use crate::progress::import_progress_bar;
 use std::io::{self, Write};
 
 pub fn rollback_coordinates_sqlite(
@@ -250,6 +256,11 @@ pub fn rollback_coordinates_sqlite(
         });
     }
 
+    let pb = import_progress_bar(
+        selected.rows,
+        "Rolling back SQLite coordinates...",
+    )?;
+
     let tx = conn.transaction()?;
 
     let restored = tx.execute(
@@ -286,6 +297,9 @@ pub fn rollback_coordinates_sqlite(
 
     tx.commit()?;
 
+    pb.inc(restored as u64);
+    pb.finish_with_message("SQLite coordinate rollback completed.");
+    
     Ok(ConvertRollbackStats {
         rows_restored: restored,
         backup_timestamp: selected.backup_timestamp.clone(),
