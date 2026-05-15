@@ -22,11 +22,13 @@ pub fn fetch_raw_features(page_size: i64) -> Result<Vec<Value>> {
 
     let layer_info = fetch_layer_info(&client).context("Unable to fetch ArcGIS layer info")?;
 
-    let effective_page_size = if page_size <= 0 {
+    let requested_page_size = if page_size <= 0 {
         layer_info.max_record_count
     } else {
         page_size
     };
+
+    let effective_page_size = requested_page_size.min(layer_info.max_record_count).max(1);
 
     fetch_all_features(&client, effective_page_size).context("Unable to fetch ArcGIS features")
 }
