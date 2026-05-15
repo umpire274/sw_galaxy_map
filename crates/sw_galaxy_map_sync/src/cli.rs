@@ -9,6 +9,12 @@ pub enum DbDriverArg {
     Mysql,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CoordinateUnitArg {
+    Pc,
+    Ly,
+}
+
 /// ArcGIS-first synchronization and ingestion tool.
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -31,6 +37,11 @@ pub enum Commands {
     /// Database Operations commands.
     #[command(subcommand)]
     Db(DbCommands),
+
+    Convert {
+        #[command(subcommand)]
+        command: ConvertCommands,
+    },
 }
 
 /// ArcGIS command group.
@@ -153,5 +164,30 @@ pub enum DbCommands {
 
         #[arg(long)]
         db_config: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConvertCommands {
+    Coordinates {
+        /// Database backend driver.
+        #[arg(long, value_enum, default_value_t = DbDriverArg::Sqlite)]
+        driver: DbDriverArg,
+
+        /// SQLite database path.
+        #[arg(long)]
+        db: Option<PathBuf>,
+
+        /// JSON database configuration for remote backends.
+        #[arg(long)]
+        db_config: Option<PathBuf>,
+
+        /// Target coordinate unit.
+        #[arg(long, value_enum)]
+        to: CoordinateUnitArg,
+
+        /// Run without applying database changes.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
