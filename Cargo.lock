@@ -4647,7 +4647,7 @@ dependencies = [
 
 [[package]]
 name = "sw_galaxy_map_sync"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4660,7 +4660,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "sw_galaxy_map_core",
  "tokio",
 ]
 

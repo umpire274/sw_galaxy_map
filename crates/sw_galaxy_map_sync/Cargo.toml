@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_sync"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 authors = ["Alessandro Maestri <umpire274@gmail.com>"]
 description = "ArcGIS-first synchronization and ingestion tool for the Star Wars galaxy map and Astronavis datasets"
@@ -23,7 +23,6 @@ indicatif.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
-sw_galaxy_map_core = { version = "0.15.2", path = "../sw_galaxy_map_core" }
 
 sqlx = { version = "0.8.6", default-features = false, features = [
     "postgres",

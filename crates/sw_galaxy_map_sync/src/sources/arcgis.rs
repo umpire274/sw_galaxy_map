@@ -6,15 +6,21 @@ use std::time::Duration;
 use crate::models::{ArcgisDataset, ArcgisRecord, NormalizedPlanet};
 use crate::utils::{build_planet_norm, hash_source, normalize_text};
 
-/// Fetch raw ArcGIS attributes through the core provider.
+const ARCGIS_LAYER_URL: &str = "https://services1.arcgis.com/1v2rNoG1em5vEBVC/arcgis/rest/services/Star_Wars_Galaxy_Map/FeatureServer/0";
+
+#[derive(Debug, Clone, Copy)]
+struct ArcgisLayerInfo {
+    max_record_count: i64,
+}
+
+/// Fetch raw ArcGIS attributes directly from the ArcGIS FeatureServer.
 pub fn fetch_raw_features(page_size: i64) -> Result<Vec<Value>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .context("Unable to create HTTP client")?;
 
-    let layer_info = sw_galaxy_map_core::provision::arcgis::fetch_layer_info(&client)
-        .context("Unable to fetch ArcGIS layer info")?;
+    let layer_info = fetch_layer_info(&client).context("Unable to fetch ArcGIS layer info")?;
 
     let effective_page_size = if page_size <= 0 {
         layer_info.max_record_count
@@ -22,8 +28,93 @@ pub fn fetch_raw_features(page_size: i64) -> Result<Vec<Value>> {
         page_size
     };
 
-    sw_galaxy_map_core::provision::arcgis::fetch_all_features(&client, effective_page_size)
-        .context("Unable to fetch ArcGIS features")
+    fetch_all_features(&client, effective_page_size).context("Unable to fetch ArcGIS features")
+}
+
+fn fetch_layer_info(client: &Client) -> Result<ArcgisLayerInfo> {
+    let response = client
+        .get(ARCGIS_LAYER_URL)
+        .query(&[("f", "json")])
+        .send()
+        .context("Unable to send ArcGIS layer info request")?
+        .error_for_status()
+        .context("ArcGIS layer info request failed")?;
+
+    let json: Value = response
+        .json()
+        .context("Unable to decode ArcGIS layer info response")?;
+
+    let max_record_count = json
+        .get("maxRecordCount")
+        .and_then(Value::as_i64)
+        .unwrap_or(2000);
+
+    Ok(ArcgisLayerInfo { max_record_count })
+}
+
+fn fetch_all_features(client: &Client, page_size: i64) -> Result<Vec<Value>> {
+    let mut all = Vec::new();
+    let mut offset = 0_i64;
+
+    loop {
+        let page = fetch_feature_page(client, offset, page_size)?;
+
+        if page.is_empty() {
+            break;
+        }
+
+        let page_len = page.len();
+        all.extend(page);
+
+        if page_len < page_size as usize {
+            break;
+        }
+
+        offset += page_size;
+    }
+
+    Ok(all)
+}
+
+fn fetch_feature_page(client: &Client, offset: i64, page_size: i64) -> Result<Vec<Value>> {
+    let query_url = format!("{ARCGIS_LAYER_URL}/query");
+
+    let response = client
+        .get(query_url)
+        .query(&[
+            ("f", "json"),
+            ("where", "1=1"),
+            ("outFields", "*"),
+            ("returnGeometry", "false"),
+            ("resultOffset", &offset.to_string()),
+            ("resultRecordCount", &page_size.to_string()),
+            ("orderByFields", "FID ASC"),
+        ])
+        .send()
+        .with_context(|| format!("Unable to fetch ArcGIS page at offset {offset}"))?
+        .error_for_status()
+        .with_context(|| format!("ArcGIS page request failed at offset {offset}"))?;
+
+    let json: Value = response
+        .json()
+        .with_context(|| format!("Unable to decode ArcGIS page at offset {offset}"))?;
+
+    if let Some(error) = json.get("error") {
+        anyhow::bail!("ArcGIS returned an error at offset {offset}: {error}");
+    }
+
+    let features = json
+        .get("features")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let attributes = features
+        .into_iter()
+        .filter_map(|feature| feature.get("attributes").cloned())
+        .collect();
+
+    Ok(attributes)
 }
 
 /// Fetch and classify ArcGIS features.
