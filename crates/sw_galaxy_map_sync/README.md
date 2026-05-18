@@ -54,8 +54,9 @@ sw_galaxy_map_sync
         ├── Metadata persistence
         │       └── meta
         │
-        └── Future normalization pipelines
-                └── pc → ly conversion
+        └── Coordinate normalization
+                ├── pc -> ly
+                └── rollback support
 ```
 
 The crate intentionally reuses the ArcGIS provider already implemented in:
@@ -221,13 +222,98 @@ UI/export coordinates    : light years
 conversion               : ly = pc × 3.26156
 ```
 
-Future releases will introduce:
+The sync crate now supports transactional coordinate normalization workflows:
+
+- pc → ly conversion
+- ly → pc conversion
+- backup snapshots
+- interactive rollback
+
+---
+
+# Coordinate Conversion
+
+The sync crate supports transactional coordinate normalization workflows.
+
+Supported conversions:
 
 ```text
-pc → ly normalization pipelines
+pc ↔ ly
 ```
 
-inside the sync crate itself.
+Conversion factor:
+
+```text
+1 pc = 3.26156 ly
+```
+
+Coordinates are normalized using:
+
+```text
+2 decimal places
+```
+
+before persistence.
+
+---
+
+## SQLite Conversion
+
+```bash
+cargo run -p sw_galaxy_map_sync -- convert coordinates \
+  --driver sqlite \
+  --db res/sw_planets.sqlite \
+  --to ly
+```
+
+---
+
+## PostgreSQL Conversion
+
+```bash
+cargo run -p sw_galaxy_map_sync -- convert coordinates \
+  --driver postgres \
+  --db-config res/config.postgres.json \
+  --to ly
+```
+
+---
+
+## Safety Guarantees
+
+Before conversion, the pipeline:
+
+- verifies current coordinate unit,
+- prevents redundant conversions,
+- creates coordinate backups,
+- executes conversion inside a transaction.
+
+---
+
+# Coordinate Rollback
+
+Every conversion creates a snapshot inside:
+
+```text
+planets_coordinates_backup
+```
+
+Rollback is interactive and allows restoring previous snapshots.
+
+Example:
+
+```bash
+cargo run -p sw_galaxy_map_sync -- convert rollback \
+  --driver sqlite \
+  --db res/sw_planets.sqlite
+```
+
+The rollback workflow:
+
+- lists available backups,
+- prompts for snapshot selection,
+- requests confirmation,
+- restores coordinates transactionally.
 
 ---
 
@@ -625,7 +711,6 @@ v0.8.x  Advanced analytics and reconciliation
 
 Potential future features:
 
-* pc → ly normalization,
 * batch PostgreSQL synchronization,
 * COPY-based bulk import,
 * MySQL backend,

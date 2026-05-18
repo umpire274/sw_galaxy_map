@@ -5,6 +5,63 @@ All notable changes to `sw_galaxy_map_sync` will be documented in this file.
 The format is based on Keep a Changelog
 and this project follows Semantic Versioning.
 
+## [0.4.3] - 2026-05-18
+
+### Added
+
+- add coordinate normalization pipeline
+- add `convert coordinates` command
+- add pc ↔ ly coordinate conversion support
+- add transactional coordinate backup infrastructure
+- add `planets_coordinates_backup` snapshot table
+- add interactive coordinate rollback workflow
+- add backup selection interface for rollback operations
+- add SQLite coordinate conversion support
+- add PostgreSQL coordinate conversion support
+- add SQLite coordinate rollback support
+- add PostgreSQL coordinate rollback support
+- add dry-run support for coordinate workflows
+- add spinner-based progress feedback for bulk coordinate operations
+
+### Changed
+
+- standardize coordinate workflows across SQLite and PostgreSQL backends
+- round normalized coordinates to two decimal places
+- persist coordinate unit state through `grid_unit`
+
+### Fixed
+
+- prevent redundant coordinate conversions when target unit already matches database state
+- improve rollback safety through transactional restore execution
+
+---
+
+## [0.4.2] - 2026-05-16
+
+### Added
+
+- add standalone ArcGIS FeatureServer access layer
+- add standalone ArcGIS layer metadata fetching
+- add standalone paginated ArcGIS feature retrieval
+- add standalone ArcGIS error handling
+- add internal ArcGIS paging infrastructure inside sync crate
+
+### Changed
+
+- move ArcGIS provider logic from `sw_galaxy_map_core` into `sw_galaxy_map_sync`
+- remove dependency on `sw_galaxy_map_core::provision::arcgis`
+- continue decoupling sync crate from core provisioning infrastructure
+- keep ArcGIS normalization and known/unknown classification inside sync crate
+- standardize standalone synchronization architecture
+
+### Fixed
+
+- clamp ArcGIS page size to layer `maxRecordCount`
+- prevent truncated imports when oversized ArcGIS page sizes are requested
+- preserve correct ArcGIS pagination behavior across multi-page imports
+
+---
+
 ## [0.4.1] - 2026-05-15
 
 ### Fixed
