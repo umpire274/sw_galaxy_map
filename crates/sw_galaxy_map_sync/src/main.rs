@@ -11,7 +11,7 @@ use sw_galaxy_map_sync::pipeline::arcgis_import::{
     import_arcgis_to_sqlite,
 };
 use sw_galaxy_map_sync::pipeline::convert_coordinates::{
-    ConvertCoordinatesOptions, print_convert_coordinates_summary,
+    ConvertCoordinatesOptions, print_convert_coordinates_summary, rollback_coordinates_postgres,
 };
 use sw_galaxy_map_sync::pipeline::convert_coordinates::{
     convert_coordinates_postgres, convert_coordinates_sqlite, print_convert_rollback_summary,
@@ -289,11 +289,13 @@ async fn main() -> Result<()> {
                     }
 
                     DbDriverArg::Postgres => {
-                        anyhow::bail!("PostgreSQL coordinate rollback is not implemented yet")
+                        let stats = rollback_coordinates_postgres(&options).await?;
+                        print_convert_rollback_summary(&stats);
+                        Ok(())
                     }
 
                     DbDriverArg::Mysql => {
-                        anyhow::bail!("MySQL backend is not implemented yet")
+                        bail!("MySQL backend is not implemented yet")
                     }
                 }
             }

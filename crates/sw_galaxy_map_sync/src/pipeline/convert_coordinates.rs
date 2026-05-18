@@ -1,7 +1,10 @@
 use crate::cli::{CoordinateUnitArg, DbDriverArg};
+use crate::db::config::load_db_config;
+use crate::db::postgres::build_postgres_connect_options;
 use crate::progress::spinner;
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, params};
+use sqlx::{Connection as SqlxConnection, PgConnection};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -161,9 +164,134 @@ pub fn convert_coordinates_sqlite(
 }
 
 pub async fn convert_coordinates_postgres(
-    _options: &ConvertCoordinatesOptions,
+    options: &ConvertCoordinatesOptions,
 ) -> Result<ConvertCoordinatesStats> {
-    bail!("PostgreSQL coordinate conversion is not implemented yet")
+    let db_config = options
+        .db_config
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--db-config is required when --driver postgres"))?;
+
+    let cfg = load_db_config(db_config)?;
+    let connect_options = build_postgres_connect_options(&cfg)?;
+    let mut conn = PgConnection::connect_with(&connect_options).await?;
+
+    let target_unit = match options.to {
+        CoordinateUnitArg::Pc => "pc",
+        CoordinateUnitArg::Ly => "ly",
+    };
+
+    let current_unit: String = sqlx::query_scalar(
+        r#"
+        SELECT grid_unit
+        FROM planets
+        WHERE grid_unit IS NOT NULL
+        LIMIT 1
+        "#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    if current_unit.eq_ignore_ascii_case(target_unit) {
+        bail!("Coordinates are already stored in '{target_unit}'. Nothing to convert.");
+    }
+
+    let rows_checked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM planets")
+        .fetch_one(&mut conn)
+        .await?;
+
+    if options.dry_run {
+        return Ok(ConvertCoordinatesStats {
+            rows_checked: rows_checked as usize,
+            rows_converted: rows_checked as usize,
+            rows_backed_up: 0,
+            from_unit: current_unit,
+            to_unit: target_unit.to_string(),
+            dry_run: true,
+        });
+    }
+
+    let factor = match (current_unit.as_str(), target_unit) {
+        ("pc", "ly") => PC_TO_LY,
+        ("ly", "pc") => 1.0 / PC_TO_LY,
+        _ => bail!(
+            "Unsupported coordinate conversion: '{}' -> '{}'",
+            current_unit,
+            target_unit
+        ),
+    };
+
+    let backup_timestamp = chrono::Utc::now().to_rfc3339();
+
+    let mut tx = conn.begin().await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS planets_coordinates_backup (
+            fid BIGINT NOT NULL,
+            x DOUBLE PRECISION NOT NULL,
+            y DOUBLE PRECISION NOT NULL,
+            grid_unit TEXT NOT NULL,
+            backup_timestamp TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let backed_up = sqlx::query(
+        r#"
+        INSERT INTO planets_coordinates_backup (
+            fid,
+            x,
+            y,
+            grid_unit,
+            backup_timestamp
+        )
+        SELECT
+            FID,
+            X,
+            Y,
+            grid_unit,
+            $1
+        FROM planets
+        "#,
+    )
+    .bind(&backup_timestamp)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected() as usize;
+
+    println!();
+    let spinner = spinner("Converting PostgreSQL coordinates...");
+
+    let converted = sqlx::query(
+        r#"
+        UPDATE planets
+        SET
+            X = ROUND((X * $1)::numeric, 2)::double precision,
+            Y = ROUND((Y * $1)::numeric, 2)::double precision,
+            grid_unit = $2
+        "#,
+    )
+    .bind(factor)
+    .bind(target_unit)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected() as usize;
+
+    spinner.finish_with_message("PostgreSQL coordinate conversion completed.");
+    println!();
+
+    tx.commit().await?;
+
+    Ok(ConvertCoordinatesStats {
+        rows_checked: rows_checked as usize,
+        rows_converted: converted,
+        rows_backed_up: backed_up,
+        from_unit: current_unit,
+        to_unit: target_unit.to_string(),
+        dry_run: false,
+    })
 }
 
 pub fn print_convert_coordinates_summary(stats: &ConvertCoordinatesStats) {
@@ -305,6 +433,113 @@ pub fn rollback_coordinates_sqlite(
     })
 }
 
+pub async fn rollback_coordinates_postgres(
+    options: &ConvertCoordinatesOptions,
+) -> Result<ConvertRollbackStats> {
+    let db_config = options
+        .db_config
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--db-config is required when --driver postgres"))?;
+
+    let cfg = load_db_config(db_config)?;
+    let connect_options = build_postgres_connect_options(&cfg)?;
+
+    let mut conn = PgConnection::connect_with(&connect_options).await?;
+
+    ensure_backup_table_exists_postgres(&mut conn).await?;
+
+    let backups = load_coordinate_backups_postgres(&mut conn).await?;
+
+    if backups.is_empty() {
+        bail!("No coordinate backups found.");
+    }
+
+    println!();
+    println!("Available coordinate backups:");
+    println!();
+
+    for backup in &backups {
+        println!(
+            "[{}] {} - {} rows - {}",
+            backup.index, backup.backup_timestamp, backup.rows, backup.grid_unit
+        );
+    }
+
+    println!();
+    print!("Select backup to restore: ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    let selected_index: usize = input.trim().parse().context("Invalid backup selection")?;
+
+    let selected = backups
+        .iter()
+        .find(|entry| entry.index == selected_index)
+        .ok_or_else(|| anyhow::anyhow!("Selected backup does not exist"))?;
+
+    println!();
+    println!(
+        "This will restore {} coordinate rows from backup timestamp {}.",
+        selected.rows, selected.backup_timestamp
+    );
+    println!("Target grid_unit: {}", selected.grid_unit);
+
+    print!("Continue? [y/N]: ");
+    io::stdout().flush()?;
+
+    let mut confirm = String::new();
+    io::stdin().read_line(&mut confirm)?;
+
+    if !confirm.trim().eq_ignore_ascii_case("y") {
+        bail!("Rollback cancelled.");
+    }
+
+    if options.dry_run {
+        return Ok(ConvertRollbackStats {
+            rows_restored: selected.rows,
+            backup_timestamp: selected.backup_timestamp.clone(),
+            grid_unit: selected.grid_unit.clone(),
+            dry_run: true,
+        });
+    }
+
+    let mut tx = conn.begin().await?;
+
+    println!();
+    let spinner = spinner("Rolling back PostgreSQL coordinates...");
+
+    let restored = sqlx::query(
+        r#"
+        UPDATE planets
+        SET
+            X = b.X,
+            Y = b.Y,
+            grid_unit = b.grid_unit
+        FROM planets_coordinates_backup b
+        WHERE planets.FID = b.fid
+          AND b.backup_timestamp = $1
+        "#,
+    )
+    .bind(&selected.backup_timestamp)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected() as usize;
+
+    spinner.finish_with_message("PostgreSQL coordinate rollback completed.");
+    println!();
+
+    tx.commit().await?;
+
+    Ok(ConvertRollbackStats {
+        rows_restored: restored,
+        backup_timestamp: selected.backup_timestamp.clone(),
+        grid_unit: selected.grid_unit.clone(),
+        dry_run: false,
+    })
+}
+
 fn ensure_backup_table_exists_sqlite(conn: &Connection) -> Result<()> {
     let exists: i64 = conn.query_row(
         r#"
@@ -318,6 +553,26 @@ fn ensure_backup_table_exists_sqlite(conn: &Connection) -> Result<()> {
     )?;
 
     if exists == 0 {
+        bail!("Backup table 'planets_coordinates_backup' does not exist.");
+    }
+
+    Ok(())
+}
+
+async fn ensure_backup_table_exists_postgres(conn: &mut PgConnection) -> Result<()> {
+    let exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = 'planets_coordinates_backup'
+        )
+        "#,
+    )
+    .fetch_one(conn)
+    .await?;
+
+    if !exists {
         bail!("Backup table 'planets_coordinates_backup' does not exist.");
     }
 
@@ -357,6 +612,39 @@ fn load_coordinate_backups_sqlite(conn: &Connection) -> Result<Vec<CoordinateBac
             grid_unit,
         });
     }
+
+    Ok(backups)
+}
+
+async fn load_coordinate_backups_postgres(
+    conn: &mut PgConnection,
+) -> Result<Vec<CoordinateBackupEntry>> {
+    let rows = sqlx::query_as::<_, (String, i64, String)>(
+        r#"
+        SELECT
+            backup_timestamp,
+            COUNT(*) AS rows_count,
+            COALESCE(MIN(grid_unit), '') AS grid_unit
+        FROM planets_coordinates_backup
+        GROUP BY backup_timestamp
+        ORDER BY backup_timestamp DESC
+        "#,
+    )
+    .fetch_all(conn)
+    .await?;
+
+    let backups = rows
+        .into_iter()
+        .enumerate()
+        .map(
+            |(idx, (backup_timestamp, rows_count, grid_unit))| CoordinateBackupEntry {
+                index: idx + 1,
+                backup_timestamp,
+                rows: rows_count as usize,
+                grid_unit,
+            },
+        )
+        .collect();
 
     Ok(backups)
 }
