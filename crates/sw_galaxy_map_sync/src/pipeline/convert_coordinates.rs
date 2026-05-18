@@ -49,6 +49,52 @@ pub fn round_2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
+fn detect_single_grid_unit_sqlite(conn: &Connection) -> anyhow::Result<String> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT DISTINCT LOWER(TRIM(grid_unit))
+        FROM planets
+        WHERE grid_unit IS NOT NULL
+          AND TRIM(grid_unit) <> ''
+        "#,
+    )?;
+
+    let units = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    match units.as_slice() {
+        [] => anyhow::bail!("No valid grid_unit values found in planets."),
+        [unit] => Ok(unit.clone()),
+        _ => anyhow::bail!(
+            "Mixed grid_unit values found in planets: {:?}. Coordinate conversion aborted.",
+            units
+        ),
+    }
+}
+
+async fn detect_single_grid_unit_postgres(conn: &mut PgConnection) -> anyhow::Result<String> {
+    let units: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT LOWER(TRIM(grid_unit))
+        FROM planets
+        WHERE grid_unit IS NOT NULL
+          AND TRIM(grid_unit) <> ''
+        "#,
+    )
+    .fetch_all(conn)
+    .await?;
+
+    match units.as_slice() {
+        [] => anyhow::bail!("No valid grid_unit values found in planets."),
+        [unit] => Ok(unit.clone()),
+        _ => anyhow::bail!(
+            "Mixed grid_unit values found in planets: {:?}. Coordinate conversion aborted.",
+            units
+        ),
+    }
+}
+
 pub fn convert_coordinates_sqlite(
     options: &ConvertCoordinatesOptions,
 ) -> Result<ConvertCoordinatesStats> {
@@ -65,11 +111,7 @@ pub fn convert_coordinates_sqlite(
         CoordinateUnitArg::Ly => "ly",
     };
 
-    let current_unit: String = conn.query_row(
-        "SELECT grid_unit FROM planets WHERE grid_unit IS NOT NULL LIMIT 1",
-        [],
-        |row| row.get(0),
-    )?;
+    let current_unit = detect_single_grid_unit_sqlite(&conn)?;
 
     if current_unit.eq_ignore_ascii_case(target_unit) {
         bail!("Coordinates are already stored in '{target_unit}'. Nothing to convert.");
@@ -180,16 +222,7 @@ pub async fn convert_coordinates_postgres(
         CoordinateUnitArg::Ly => "ly",
     };
 
-    let current_unit: String = sqlx::query_scalar(
-        r#"
-        SELECT grid_unit
-        FROM planets
-        WHERE grid_unit IS NOT NULL
-        LIMIT 1
-        "#,
-    )
-    .fetch_one(&mut conn)
-    .await?;
+    let current_unit = detect_single_grid_unit_postgres(&mut conn).await?;
 
     if current_unit.eq_ignore_ascii_case(target_unit) {
         bail!("Coordinates are already stored in '{target_unit}'. Nothing to convert.");
