@@ -579,62 +579,10 @@ async fn ensure_backup_table_exists_postgres(conn: &mut PgConnection) -> Result<
     Ok(())
 }
 
-fn load_coordinate_backups_sqlite(conn: &Connection) -> Result<Vec<CoordinateBackupEntry>> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT
-            backup_timestamp,
-            COUNT(*) AS rows_count,
-            COALESCE(MIN(grid_unit), '') AS grid_unit
-        FROM planets_coordinates_backup
-        GROUP BY backup_timestamp
-        ORDER BY backup_timestamp DESC
-        "#,
-    )?;
-
-    let mut backups = Vec::new();
-
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-
-    for (idx, row) in rows.enumerate() {
-        let (backup_timestamp, rows_count, grid_unit) = row?;
-
-        backups.push(CoordinateBackupEntry {
-            index: idx + 1,
-            backup_timestamp,
-            rows: rows_count as usize,
-            grid_unit,
-        });
-    }
-
-    Ok(backups)
-}
-
-async fn load_coordinate_backups_postgres(
-    conn: &mut PgConnection,
-) -> Result<Vec<CoordinateBackupEntry>> {
-    let rows = sqlx::query_as::<_, (String, i64, String)>(
-        r#"
-        SELECT
-            backup_timestamp,
-            COUNT(*) AS rows_count,
-            COALESCE(MIN(grid_unit), '') AS grid_unit
-        FROM planets_coordinates_backup
-        GROUP BY backup_timestamp
-        ORDER BY backup_timestamp DESC
-        "#,
-    )
-    .fetch_all(conn)
-    .await?;
-
-    let backups = rows
-        .into_iter()
+fn coordinate_backup_entries_from_rows(
+    rows: Vec<(String, i64, String)>,
+) -> Vec<CoordinateBackupEntry> {
+    rows.into_iter()
         .enumerate()
         .map(
             |(idx, (backup_timestamp, rows_count, grid_unit))| CoordinateBackupEntry {
@@ -644,7 +592,45 @@ async fn load_coordinate_backups_postgres(
                 grid_unit,
             },
         )
-        .collect();
+        .collect()
+}
 
-    Ok(backups)
+fn load_coordinate_backups_sqlite(conn: &Connection) -> anyhow::Result<Vec<CoordinateBackupEntry>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT backup_timestamp, COUNT(*) AS rows_count, COALESCE(MIN(grid_unit), '') AS grid_unit
+        FROM planets_coordinates_backup
+        GROUP BY backup_timestamp
+        ORDER BY backup_timestamp DESC
+        "#,
+    )?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(coordinate_backup_entries_from_rows(rows))
+}
+
+async fn load_coordinate_backups_postgres(
+    conn: &mut PgConnection,
+) -> anyhow::Result<Vec<CoordinateBackupEntry>> {
+    let rows = sqlx::query_as::<_, (String, i64, String)>(
+        r#"
+        SELECT backup_timestamp, COUNT(*) AS rows_count, COALESCE(MIN(grid_unit), '') AS grid_unit
+        FROM planets_coordinates_backup
+        GROUP BY backup_timestamp
+        ORDER BY backup_timestamp DESC
+        "#,
+    )
+    .fetch_all(conn)
+    .await?;
+
+    Ok(coordinate_backup_entries_from_rows(rows))
 }
