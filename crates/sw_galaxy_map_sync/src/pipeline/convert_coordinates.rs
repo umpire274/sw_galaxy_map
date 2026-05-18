@@ -1,4 +1,8 @@
 use crate::cli::{CoordinateUnitArg, DbDriverArg};
+use crate::progress::spinner;
+use anyhow::{bail, Context, Result};
+use rusqlite::{params, Connection};
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -41,9 +45,6 @@ pub const PC_TO_LY: f64 = 3.26156;
 pub fn round_2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
-
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
 
 pub fn convert_coordinates_sqlite(
     options: &ConvertCoordinatesOptions,
@@ -96,7 +97,8 @@ pub fn convert_coordinates_sqlite(
 
     let backup_timestamp = chrono::Utc::now().to_rfc3339();
 
-    let pb = import_progress_bar(rows_checked as usize, "Converting SQLite coordinates...")?;
+    println!();
+    let pb = spinner("Converting SQLite coordinates...");
 
     let tx = conn.transaction()?;
 
@@ -145,8 +147,8 @@ pub fn convert_coordinates_sqlite(
 
     tx.commit()?;
 
-    pb.inc(rows_checked as u64);
     pb.finish_with_message("SQLite coordinate conversion completed.");
+    println!();
 
     Ok(ConvertCoordinatesStats {
         rows_checked: rows_checked as usize,
@@ -183,9 +185,6 @@ pub fn print_convert_rollback_summary(stats: &ConvertRollbackStats) {
     println!("Grid unit        : {}", stats.grid_unit);
     println!("Dry run          : {}", stats.dry_run);
 }
-
-use crate::progress::import_progress_bar;
-use std::io::{self, Write};
 
 pub fn rollback_coordinates_sqlite(
     options: &ConvertCoordinatesOptions,
@@ -256,10 +255,8 @@ pub fn rollback_coordinates_sqlite(
         });
     }
 
-    let pb = import_progress_bar(
-        selected.rows,
-        "Rolling back SQLite coordinates...",
-    )?;
+    println!();
+    let pb = spinner("Rolling back SQLite coordinates...");
 
     let tx = conn.transaction()?;
 
@@ -297,9 +294,9 @@ pub fn rollback_coordinates_sqlite(
 
     tx.commit()?;
 
-    pb.inc(restored as u64);
     pb.finish_with_message("SQLite coordinate rollback completed.");
-    
+    println!();
+
     Ok(ConvertRollbackStats {
         rows_restored: restored,
         backup_timestamp: selected.backup_timestamp.clone(),
