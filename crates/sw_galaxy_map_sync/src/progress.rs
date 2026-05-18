@@ -19,3 +19,16 @@ pub fn import_progress_bar(
 
     Ok(pb)
 }
+
+pub fn spinner(message: impl Into<String>) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] {msg}").unwrap(),
+    );
+
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+    pb.set_message(message.into());
+
+    pb
+}
