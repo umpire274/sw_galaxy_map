@@ -489,6 +489,18 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
         report.fid_mismatches.len()
     );
     println!(
+        "  expected synthetic remap : {}",
+        report.expected_synthetic_fid_mismatches()
+    );
+    println!(
+        "  suspicious positive FID  : {}",
+        report.suspicious_positive_fid_mismatches()
+    );
+    println!(
+        "  other FID mismatches     : {}",
+        report.other_fid_mismatches()
+    );
+    println!(
         "Grid unit mismatches       : {}",
         report.grid_unit_mismatches.len()
     );
@@ -514,8 +526,8 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
         println!("First FID mismatches:");
         for mismatch in report.fid_mismatches.iter().take(20) {
             println!(
-                "  - {}: local={} remote={}",
-                mismatch.planet, mismatch.local_fid, mismatch.remote_fid
+                "  - {}: local={} remote={} severity={:?}",
+                mismatch.planet, mismatch.local_fid, mismatch.remote_fid, mismatch.severity
             );
         }
     }

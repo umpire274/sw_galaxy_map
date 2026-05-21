@@ -28,12 +28,43 @@ pub struct PullDiffReport {
     pub grid_unit_mismatches: Vec<GridUnitMismatch>,
 }
 
+impl PullDiffReport {
+    pub fn expected_synthetic_fid_mismatches(&self) -> usize {
+        self.fid_mismatches
+            .iter()
+            .filter(|m| m.severity == FidMismatchSeverity::ExpectedSyntheticRemap)
+            .count()
+    }
+
+    pub fn suspicious_positive_fid_mismatches(&self) -> usize {
+        self.fid_mismatches
+            .iter()
+            .filter(|m| m.severity == FidMismatchSeverity::SuspiciousPositiveMismatch)
+            .count()
+    }
+
+    pub fn other_fid_mismatches(&self) -> usize {
+        self.fid_mismatches
+            .iter()
+            .filter(|m| m.severity == FidMismatchSeverity::Other)
+            .count()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FidMismatchSeverity {
+    ExpectedSyntheticRemap,
+    SuspiciousPositiveMismatch,
+    Other,
+}
+
 /// Represents a FID mismatch between local and remote datasets.
 #[derive(Debug, Clone)]
 pub struct FidMismatch {
     pub planet: String,
     pub local_fid: i64,
     pub remote_fid: i64,
+    pub severity: FidMismatchSeverity,
 }
 
 /// Represents a coordinate unit mismatch between local and remote datasets.
@@ -122,6 +153,16 @@ async fn load_remote_planets(conn: &mut PgConnection) -> anyhow::Result<Vec<Diff
         .collect())
 }
 
+fn classify_fid_mismatch(local_fid: i64, remote_fid: i64) -> FidMismatchSeverity {
+    match (local_fid, remote_fid) {
+        (local, remote) if local > 0 && remote < 0 => FidMismatchSeverity::ExpectedSyntheticRemap,
+        (local, remote) if local > 0 && remote > 0 && local != remote => {
+            FidMismatchSeverity::SuspiciousPositiveMismatch
+        }
+        _ => FidMismatchSeverity::Other,
+    }
+}
+
 /// Computes a read-only diff between the local SQLite database and the remote
 /// canonical PostgreSQL database.
 pub async fn diff_local_with_remote(
@@ -150,6 +191,7 @@ pub async fn diff_local_with_remote(
                         planet: remote.planet.clone(),
                         local_fid: local.fid,
                         remote_fid: remote.fid,
+                        severity: classify_fid_mismatch(local.fid, remote.fid),
                     });
                 }
 
