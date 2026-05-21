@@ -27,7 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 
-sw_galaxy_map_core = { version = "0.15.2", path = "../sw_galaxy_map_core" }
+sw_galaxy_map_core = { version = "0.16.0", path = "../sw_galaxy_map_core" }
 
 [dependencies.inquire]
 version = "0.7.5"

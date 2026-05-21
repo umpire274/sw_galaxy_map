@@ -31,7 +31,7 @@ rfd.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 
-sw_galaxy_map_core = { version = "0.15.2", path = "../sw_galaxy_map_core" }
+sw_galaxy_map_core = { version = "0.16.0", path = "../sw_galaxy_map_core" }
 sw_galaxy_map_cli = { version = "0.15.5", path = "../sw_galaxy_map_cli" }
 
 [target.'cfg(windows)'.build-dependencies]
