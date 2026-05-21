@@ -1,9 +1,13 @@
+use crate::cli::args::DbPullCommand;
+use crate::cli::reports::print_pull_diff_report;
 use crate::cli::{
     args, commands, open_db_migrating, open_db_raw, print_db_init_report, print_db_status_report,
     print_db_update_report, print_galaxy_stats, print_migration_report,
 };
 use crate::ui::{info, success};
 use std::path::PathBuf;
+use sw_galaxy_map_core::db::pull::config::RemoteDbConfig;
+use sw_galaxy_map_core::db::pull::diff::diff_local_with_remote;
 use sw_galaxy_map_core::validate;
 
 pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Result<()> {
@@ -118,6 +122,21 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
             args::DbCommands::Backup(args) => commands::db::backup::run(cli.db.clone(), args),
 
             args::DbCommands::Export(args) => commands::db::export::run(cli.db.clone(), args),
+
+            args::DbCommands::Pull { command } => match command {
+                DbPullCommand::Diff { db, remote_config } => {
+                    let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
+
+                    let runtime = tokio::runtime::Runtime::new()?;
+
+                    let report = runtime
+                        .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
+
+                    print_pull_diff_report(&report);
+
+                    Ok(())
+                }
+            },
         },
 
         args::Commands::Search {

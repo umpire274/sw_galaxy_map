@@ -3,6 +3,7 @@ use crate::ui::{error, info, success, warning};
 use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
+use sw_galaxy_map_core::db::pull::diff::PullDiffReport;
 
 pub(crate) fn print_db_init_report(report: &sw_galaxy_map_core::db::db_init::DbInitReport) {
     println!(
@@ -466,6 +467,67 @@ pub(crate) fn build_galaxy_stats_tui(
                 "  Avg detours  : {:.1} per route",
                 s.avg_detours_per_route
             ));
+        }
+    }
+}
+
+pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
+    println!();
+    println!("Local/remote pull diff completed.");
+    println!("Local planets              : {}", report.local_planets);
+    println!("Remote planets             : {}", report.remote_planets);
+    println!(
+        "Missing local planets      : {}",
+        report.missing_local_planets.len()
+    );
+    println!(
+        "Stale local planets        : {}",
+        report.stale_local_planets.len()
+    );
+    println!(
+        "FID mismatches             : {}",
+        report.fid_mismatches.len()
+    );
+    println!(
+        "Grid unit mismatches       : {}",
+        report.grid_unit_mismatches.len()
+    );
+
+    if !report.missing_local_planets.is_empty() {
+        println!();
+        println!("First missing local planets:");
+        for planet in report.missing_local_planets.iter().take(20) {
+            println!("  - {planet}");
+        }
+    }
+
+    if !report.stale_local_planets.is_empty() {
+        println!();
+        println!("First stale local planets:");
+        for planet in report.stale_local_planets.iter().take(20) {
+            println!("  - {planet}");
+        }
+    }
+
+    if !report.fid_mismatches.is_empty() {
+        println!();
+        println!("First FID mismatches:");
+        for mismatch in report.fid_mismatches.iter().take(20) {
+            println!(
+                "  - {}: local={} remote={}",
+                mismatch.planet, mismatch.local_fid, mismatch.remote_fid
+            );
+        }
+    }
+
+    if !report.grid_unit_mismatches.is_empty() {
+        println!();
+        println!("First grid unit mismatches:");
+        for mismatch in report.grid_unit_mismatches.iter().take(20) {
+            println!(
+                "  - {}: local={} remote={}",
+                mismatch.planet, mismatch.local_grid_unit, mismatch.remote_grid_unit
+            );
         }
     }
 }

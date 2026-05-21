@@ -1,6 +1,6 @@
 [package]
 name = "sw_galaxy_map_cli"
-version = "0.15.5"
+version = "0.15.6"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -30,6 +30,7 @@ crossterm = "0.29.0"
 ratatui = "0.30.0"
 chrono = "0.4.44"
 csv = "1.4.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [[bin]]
 name = "sw_galaxy_map"

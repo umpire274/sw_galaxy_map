@@ -6,6 +6,7 @@ pub mod db_update;
 pub mod migrate;
 pub mod paths;
 pub mod provision;
+pub mod pull;
 pub mod queries;
 
 pub use core::*;

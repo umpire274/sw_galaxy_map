@@ -1,4 +1,5 @@
 use clap::{ArgAction, Args, Parser, Subcommand};
+use std::path::PathBuf;
 
 use sw_galaxy_map_core::domain::RouteListSort;
 
@@ -222,6 +223,24 @@ pub enum DbCommands {
 
     /// Export a database table to CSV or JSON.
     Export(DbExportArgs),
+
+    Pull {
+        #[command(subcommand)]
+        command: DbPullCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DbPullCommand {
+    Diff {
+        /// Local SQLite database path.
+        #[arg(long)]
+        db: PathBuf,
+
+        /// Remote PostgreSQL configuration JSON.
+        #[arg(long)]
+        remote_config: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]

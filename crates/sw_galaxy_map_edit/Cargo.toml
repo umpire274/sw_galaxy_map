@@ -30,5 +30,5 @@ chrono.workspace = true
 sw_galaxy_map_core = { version = "0.16.0", path = "../sw_galaxy_map_core" }
 
 [dependencies.inquire]
-version = "0.7.5"
+version = "0.9.4"
 default-features = true
