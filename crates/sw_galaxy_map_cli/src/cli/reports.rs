@@ -3,7 +3,7 @@ use crate::ui::{error, info, success, warning};
 use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
-use sw_galaxy_map_core::db::pull::diff::PullDiffReport;
+use sw_galaxy_map_core::db::pull::diff::{FidMismatchSeverity, PullDiffReport};
 
 pub(crate) fn print_db_init_report(report: &sw_galaxy_map_core::db::db_init::DbInitReport) {
     println!(
@@ -528,6 +528,24 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
             println!(
                 "  - {}: local={} remote={} severity={:?}",
                 mismatch.planet, mismatch.local_fid, mismatch.remote_fid, mismatch.severity
+            );
+        }
+    }
+
+    let suspicious = report
+        .fid_mismatches
+        .iter()
+        .filter(|mismatch| mismatch.severity == FidMismatchSeverity::SuspiciousPositiveMismatch)
+        .take(20)
+        .collect::<Vec<_>>();
+
+    if !suspicious.is_empty() {
+        println!();
+        println!("First suspicious positive FID mismatches:");
+        for mismatch in suspicious {
+            println!(
+                "  - {}: local={} remote={}",
+                mismatch.planet, mismatch.local_fid, mismatch.remote_fid
             );
         }
     }
