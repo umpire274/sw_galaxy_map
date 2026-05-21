@@ -4,7 +4,6 @@ use crate::db::pull::config::RemoteDbConfig;
 use crate::db::pull::postgres::build_postgres_connect_options;
 use rusqlite::Connection;
 use sqlx::{Connection as SqlxConnection, PgConnection};
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Summary of a local/remote pull diff operation.
@@ -50,8 +49,17 @@ pub struct GridUnitMismatch {
 struct DiffPlanetRow {
     fid: i64,
     planet: String,
-    planet_norm: String,
     grid_unit: String,
+    identity_key: String,
+}
+
+fn diff_cmp_key(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .replace('’', "'")
+        .replace('`', "'")
+        .replace("  ", " ")
 }
 
 /// Loads the minimal local SQLite planet dataset used by pull diff workflows.
@@ -61,7 +69,6 @@ fn load_local_planets(conn: &Connection) -> anyhow::Result<Vec<DiffPlanetRow>> {
         SELECT
             FID,
             Planet,
-            planet_norm,
             COALESCE(grid_unit, '') AS grid_unit
         FROM planets
         WHERE deleted = 0
@@ -71,11 +78,12 @@ fn load_local_planets(conn: &Connection) -> anyhow::Result<Vec<DiffPlanetRow>> {
 
     let rows = stmt
         .query_map([], |row| {
+            let np: String = row.get(1)?;
             Ok(DiffPlanetRow {
                 fid: row.get(0)?,
-                planet: row.get(1)?,
-                planet_norm: row.get(2)?,
-                grid_unit: row.get(3)?,
+                identity_key: diff_cmp_key(&np.as_str()),
+                planet: np,
+                grid_unit: row.get(2)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -85,16 +93,15 @@ fn load_local_planets(conn: &Connection) -> anyhow::Result<Vec<DiffPlanetRow>> {
 
 /// Loads the minimal remote PostgreSQL planet dataset used by pull diff workflows.
 async fn load_remote_planets(conn: &mut PgConnection) -> anyhow::Result<Vec<DiffPlanetRow>> {
-    let rows = sqlx::query_as::<_, (i64, String, String, String)>(
+    let rows = sqlx::query_as::<_, (i64, String, String)>(
         r#"
         SELECT
             FID,
             Planet,
-            planet_norm,
             COALESCE(grid_unit, '') AS grid_unit
         FROM planets
         WHERE deleted = 0
-        ORDER BY planet_norm
+        ORDER BY Planet
         "#,
     )
     .fetch_all(conn)
@@ -102,11 +109,15 @@ async fn load_remote_planets(conn: &mut PgConnection) -> anyhow::Result<Vec<Diff
 
     Ok(rows
         .into_iter()
-        .map(|(fid, planet, planet_norm, grid_unit)| DiffPlanetRow {
-            fid,
-            planet,
-            planet_norm,
-            grid_unit,
+        .map(|(fid, planet, grid_unit)| {
+            let identity_key = diff_cmp_key(&planet);
+
+            DiffPlanetRow {
+                fid,
+                planet,
+                grid_unit,
+                identity_key,
+            }
         })
         .collect())
 }
@@ -131,18 +142,8 @@ pub async fn diff_local_with_remote(
         ..PullDiffReport::default()
     };
 
-    let local_by_norm: HashMap<&str, &DiffPlanetRow> = local_planets
-        .iter()
-        .map(|row| (row.planet_norm.as_str(), row))
-        .collect();
-
-    let remote_by_norm: HashMap<&str, &DiffPlanetRow> = remote_planets
-        .iter()
-        .map(|row| (row.planet_norm.as_str(), row))
-        .collect();
-
     for remote in &remote_planets {
-        match local_by_norm.get(remote.planet_norm.as_str()) {
+        match find_matching_planet(remote, &local_planets) {
             Some(local) => {
                 if local.fid != remote.fid {
                     report.fid_mismatches.push(FidMismatch {
@@ -167,10 +168,50 @@ pub async fn diff_local_with_remote(
     }
 
     for local in &local_planets {
-        if !remote_by_norm.contains_key(local.planet_norm.as_str()) {
+        if find_matching_planet(local, &remote_planets).is_none() {
             report.stale_local_planets.push(local.planet.clone());
         }
     }
 
     Ok(report)
+}
+
+fn strip_roman_suffix(value: &str) -> String {
+    const ROMAN_SUFFIXES: &[&str] = &[
+        " i", " ii", " iii", " iv", " v", " vi", " vii", " viii", " ix", " x",
+    ];
+
+    let value = value.trim().to_lowercase();
+
+    for suffix in ROMAN_SUFFIXES {
+        if value.ends_with(suffix) {
+            return value[..value.len() - suffix.len()].trim().to_string();
+        }
+    }
+
+    value
+}
+
+fn same_planet_identity(left: &DiffPlanetRow, right: &DiffPlanetRow) -> bool {
+    if left.identity_key == right.identity_key {
+        return true;
+    }
+
+    let left_base = strip_roman_suffix(&left.identity_key);
+    let right_base = strip_roman_suffix(&right.identity_key);
+
+    left.identity_key == right_base || left_base == right.identity_key || left_base == right_base
+}
+fn find_matching_planet<'a>(
+    target: &DiffPlanetRow,
+    candidates: &'a [DiffPlanetRow],
+) -> Option<&'a DiffPlanetRow> {
+    candidates
+        .iter()
+        .find(|candidate| candidate.identity_key == target.identity_key)
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| same_planet_identity(target, candidate))
+        })
 }

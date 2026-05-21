@@ -8,6 +8,7 @@ use crate::ui::{info, success};
 use std::path::PathBuf;
 use sw_galaxy_map_core::db::pull::config::RemoteDbConfig;
 use sw_galaxy_map_core::db::pull::diff::diff_local_with_remote;
+use sw_galaxy_map_core::db::pull::validate::validate_remote_database;
 use sw_galaxy_map_core::validate;
 
 pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Result<()> {
@@ -128,6 +129,28 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                     let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
 
                     let runtime = tokio::runtime::Runtime::new()?;
+
+                    let validation = runtime
+                        .block_on(async { validate_remote_database(&remote_config).await })?;
+
+                    if !validation.is_valid {
+                        println!();
+                        println!("Remote database validation failed.");
+
+                        for message in &validation.messages {
+                            println!("  - {message}");
+                        }
+
+                        anyhow::bail!("Remote database is not valid for local pull operations.");
+                    }
+
+                    println!();
+                    println!("Remote database validation passed.");
+                    println!("Remote planets        : {}", validation.planets_count);
+                    println!(
+                        "Remote unknown records: {}",
+                        validation.planets_unknown_count
+                    );
 
                     let report = runtime
                         .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
