@@ -4,6 +4,7 @@ use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
 use sw_galaxy_map_core::db::pull::diff::{FidMismatchSeverity, PullDiffReport};
+use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 
 pub(crate) fn print_db_init_report(report: &sw_galaxy_map_core::db::db_init::DbInitReport) {
     println!(
@@ -563,55 +564,24 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
 }
 
 #[allow(dead_code)]
-pub(crate) fn print_pull_update_plan(report: &PullDiffReport, dry_run: bool) {
+pub(crate) fn print_pull_update_plan(plan: &PullUpdatePlan) {
     println!();
     println!("Local pull update plan.");
-    println!("Dry run                  : {dry_run}");
-    println!("Remote planets           : {}", report.remote_planets);
-    println!("Local planets            : {}", report.local_planets);
+    println!("Would insert rows        : {}", plan.would_insert);
+    println!("Would mark stale rows    : {}", plan.would_mark_stale);
+    println!("Expected FID remaps      : {}", plan.expected_fid_remaps);
     println!(
-        "Would insert local rows  : {}",
-        report.missing_local_planets.len()
+        "Blocking FID mismatches  : {}",
+        plan.blocking_fid_mismatches
     );
-    println!(
-        "Would mark stale rows    : {}",
-        report.stale_local_planets.len()
-    );
-    println!("FID mismatches           : {}", report.fid_mismatches.len());
-    println!(
-        "  expected synthetic     : {}",
-        report.expected_synthetic_fid_mismatches()
-    );
-    println!(
-        "  suspicious positive    : {}",
-        report.suspicious_positive_fid_mismatches()
-    );
-    println!(
-        "Grid unit mismatches     : {}",
-        report.grid_unit_mismatches.len()
-    );
+    println!("Grid unit mismatches     : {}", plan.grid_unit_mismatches);
+    println!("Can apply safely         : {}", plan.can_apply);
 
-    if report.suspicious_positive_fid_mismatches() > 0 {
+    if !plan.blocking_reasons.is_empty() {
         println!();
-        println!("Blocking warning:");
-        println!(
-            "  Suspicious positive FID mismatches were found. A real update should not run until these are reviewed."
-        );
-    }
-
-    if !report.missing_local_planets.is_empty() {
-        println!();
-        println!("First rows that would be inserted locally:");
-        for planet in report.missing_local_planets.iter().take(20) {
-            println!("  - {planet}");
-        }
-    }
-
-    if !report.stale_local_planets.is_empty() {
-        println!();
-        println!("First local rows that would be marked stale:");
-        for planet in report.stale_local_planets.iter().take(20) {
-            println!("  - {planet}");
+        println!("Blocking reasons:");
+        for reason in &plan.blocking_reasons {
+            println!("  - {reason}");
         }
     }
 }

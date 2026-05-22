@@ -1,4 +1,4 @@
-use crate::cli::reports::print_pull_diff_report;
+use crate::cli::reports::{print_pull_diff_report, print_pull_update_plan};
 use crate::cli::{
     args, commands, open_db_migrating, open_db_raw, print_db_init_report, print_db_status_report,
     print_db_update_report, print_galaxy_stats, print_migration_report,
@@ -7,6 +7,7 @@ use crate::ui::{info, success};
 use std::path::PathBuf;
 use sw_galaxy_map_core::db::pull::config::RemoteDbConfig;
 use sw_galaxy_map_core::db::pull::diff::diff_local_with_remote;
+use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 use sw_galaxy_map_core::db::pull::validate::validate_remote_database;
 use sw_galaxy_map_core::validate;
 
@@ -158,6 +159,8 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                         .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
 
                     print_pull_diff_report(&report);
+                    let plan = PullUpdatePlan::from_diff(&report);
+                    print_pull_update_plan(&plan);
                 } else {
                     anyhow::bail!("db pull update without --dry-run is not implemented yet");
                 }
