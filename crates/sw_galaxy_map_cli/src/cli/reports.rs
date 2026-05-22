@@ -561,3 +561,57 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
         }
     }
 }
+
+#[allow(dead_code)]
+pub(crate) fn print_pull_update_plan(report: &PullDiffReport, dry_run: bool) {
+    println!();
+    println!("Local pull update plan.");
+    println!("Dry run                  : {dry_run}");
+    println!("Remote planets           : {}", report.remote_planets);
+    println!("Local planets            : {}", report.local_planets);
+    println!(
+        "Would insert local rows  : {}",
+        report.missing_local_planets.len()
+    );
+    println!(
+        "Would mark stale rows    : {}",
+        report.stale_local_planets.len()
+    );
+    println!("FID mismatches           : {}", report.fid_mismatches.len());
+    println!(
+        "  expected synthetic     : {}",
+        report.expected_synthetic_fid_mismatches()
+    );
+    println!(
+        "  suspicious positive    : {}",
+        report.suspicious_positive_fid_mismatches()
+    );
+    println!(
+        "Grid unit mismatches     : {}",
+        report.grid_unit_mismatches.len()
+    );
+
+    if report.suspicious_positive_fid_mismatches() > 0 {
+        println!();
+        println!("Blocking warning:");
+        println!(
+            "  Suspicious positive FID mismatches were found. A real update should not run until these are reviewed."
+        );
+    }
+
+    if !report.missing_local_planets.is_empty() {
+        println!();
+        println!("First rows that would be inserted locally:");
+        for planet in report.missing_local_planets.iter().take(20) {
+            println!("  - {planet}");
+        }
+    }
+
+    if !report.stale_local_planets.is_empty() {
+        println!();
+        println!("First local rows that would be marked stale:");
+        for planet in report.stale_local_planets.iter().take(20) {
+            println!("  - {planet}");
+        }
+    }
+}

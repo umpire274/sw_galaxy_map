@@ -225,14 +225,6 @@ pub enum DbCommands {
     Export(DbExportArgs),
 
     Pull {
-        #[command(subcommand)]
-        command: DbPullCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DbPullCommand {
-    Diff {
         /// Local SQLite database path.
         #[arg(long)]
         db: PathBuf,
@@ -240,6 +232,9 @@ pub enum DbPullCommand {
         /// Remote PostgreSQL configuration JSON.
         #[arg(long)]
         remote_config: PathBuf,
+
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
 
