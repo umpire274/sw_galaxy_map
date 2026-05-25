@@ -173,6 +173,14 @@ pub enum DbCommands {
 
     /// Migrate the local database to the latest schema version
     Migrate {
+        /// Local SQLite database path.
+        #[arg(long)]
+        db: Option<PathBuf>,
+
+        /// Remote PostgreSQL configuration JSON.
+        #[arg(long)]
+        remote_config: Option<PathBuf>,
+
         /// Show what migrations would be applied without executing them
         #[arg(long, action = clap::ArgAction::SetTrue)]
         dry_run: bool,
@@ -239,6 +247,10 @@ pub enum DbCommands {
         /// Show all suspicious positive FID mismatches.
         #[arg(long, default_value_t = false)]
         show_suspicious: bool,
+
+        /// Persist suspicious FID remap candidates into the local database.
+        #[arg(long, default_value_t = false)]
+        persist_remap_candidates: bool,
     },
 }
 

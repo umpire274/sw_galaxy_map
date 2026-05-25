@@ -9,6 +9,9 @@ use crate::ui::{info, success};
 use std::path::PathBuf;
 use sw_galaxy_map_core::db::pull::config::RemoteDbConfig;
 use sw_galaxy_map_core::db::pull::diff::diff_local_with_remote;
+use sw_galaxy_map_core::db::pull::remap::{
+    build_fid_remap_candidates, persist_fid_remap_candidates,
+};
 use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 use sw_galaxy_map_core::db::pull::validate::validate_remote_database;
 use sw_galaxy_map_core::validate;
@@ -51,13 +54,31 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                 sw_galaxy_map_core::db::db_skipped_planets::run(&mut con)
             }
 
-            args::DbCommands::Migrate { dry_run } => {
-                // IMPORTANT: do not auto-migrate before running migrate
-                let mut con = open_db_raw(cli.db.clone())?;
-                let report = sw_galaxy_map_core::db::migrate::run(&mut con, *dry_run, true)?;
-                print_migration_report(&report);
-                Ok(())
-            }
+            args::DbCommands::Migrate {
+                db,
+                remote_config,
+                dry_run,
+            } => match (db, remote_config) {
+                (Some(db), None) => {
+                    // IMPORTANT: do not auto-migrate before running migrate.
+                    let mut con = open_db_raw(Some(db.display().to_string()))?;
+                    let report = sw_galaxy_map_core::db::migrate::run(&mut con, *dry_run, true)?;
+                    print_migration_report(&report);
+                    Ok(())
+                }
+
+                (None, Some(_remote_config)) => {
+                    anyhow::bail!("PostgreSQL db migrate is not implemented yet")
+                }
+
+                (Some(_), Some(_)) => {
+                    anyhow::bail!("Specify either --db or --remote-config, not both")
+                }
+
+                (None, None) => {
+                    anyhow::bail!("Specify either --db or --remote-config")
+                }
+            },
 
             args::DbCommands::RebuildSearch => {
                 let mut con = open_db_migrating(cli.db.clone())?;
@@ -131,6 +152,7 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                 remote_config,
                 dry_run,
                 show_suspicious,
+                persist_remap_candidates,
             } => {
                 let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
 
@@ -164,6 +186,48 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                     print_pull_diff_report(&report, *show_suspicious);
                     let plan = PullUpdatePlan::from_diff(&report);
                     print_pull_update_plan(&plan);
+
+                    let remap_candidates = build_fid_remap_candidates(&report);
+
+                    if *persist_remap_candidates && !remap_candidates.is_empty() {
+                        let conn = rusqlite::Connection::open(&db)?;
+
+                        let inserted = persist_fid_remap_candidates(&conn, &remap_candidates)?;
+
+                        println!();
+                        println!("Persisted remap candidates.");
+                        println!("Inserted candidates      : {inserted}");
+                        println!(
+                            "Skipped existing entries : {}",
+                            remap_candidates.len().saturating_sub(inserted)
+                        );
+                    }
+
+                    if !remap_candidates.is_empty() {
+                        println!();
+                        println!(
+                            "FID remap candidates requiring review: {}",
+                            remap_candidates.len()
+                        );
+
+                        for candidate in remap_candidates.iter().take(20) {
+                            println!(
+                                "  - {}: local={} remote={} strategy={:?} confidence={:.2}",
+                                candidate.planet,
+                                candidate.local_fid,
+                                candidate.remote_fid,
+                                candidate.strategy,
+                                candidate.confidence
+                            );
+                        }
+
+                        if remap_candidates.len() > 20 {
+                            println!(
+                                "  ... {} more remap candidates hidden. Use --show-suspicious to inspect all suspicious FID mismatches.",
+                                remap_candidates.len() - 20
+                            );
+                        }
+                    }
                 } else {
                     let report = runtime
                         .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
