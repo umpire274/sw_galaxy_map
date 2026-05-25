@@ -156,7 +156,7 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                     show_suspicious,
                     persist_remap_candidates,
                 } => {
-                    let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
+                    let remote_config = RemoteDbConfig::from_json_file(remote_config)?;
 
                     let runtime = tokio::runtime::Runtime::new()?;
 
@@ -182,9 +182,8 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                     );
 
                     if *dry_run {
-                        let report = runtime.block_on(async {
-                            diff_local_with_remote(&db, &remote_config).await
-                        })?;
+                        let report = runtime
+                            .block_on(async { diff_local_with_remote(db, &remote_config).await })?;
 
                         print_pull_diff_report(&report, *show_suspicious);
                         let plan = PullUpdatePlan::from_diff(&report);
@@ -193,7 +192,7 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                         let remap_candidates = build_fid_remap_candidates(&report);
 
                         if *persist_remap_candidates && !remap_candidates.is_empty() {
-                            let conn = rusqlite::Connection::open(&db)?;
+                            let conn = rusqlite::Connection::open(db)?;
 
                             let inserted = persist_fid_remap_candidates(&conn, &remap_candidates)?;
 
@@ -238,9 +237,8 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                             }
                         }
                     } else {
-                        let report = runtime.block_on(async {
-                            diff_local_with_remote(&db, &remote_config).await
-                        })?;
+                        let report = runtime
+                            .block_on(async { diff_local_with_remote(db, &remote_config).await })?;
                         let plan = PullUpdatePlan::from_diff(&report);
 
                         print_pull_update_plan(&plan);
@@ -254,7 +252,7 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                         let backup_id =
                             format!("local_pull_{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
 
-                        let conn = rusqlite::Connection::open(&db)?;
+                        let conn = rusqlite::Connection::open(db)?;
 
                         let preparation =
                             sw_galaxy_map_core::db::pull::staging::prepare_local_pull_staging(

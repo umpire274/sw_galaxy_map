@@ -88,8 +88,7 @@ fn diff_cmp_key(value: &str) -> String {
     value
         .trim()
         .to_lowercase()
-        .replace('’', "'")
-        .replace('`', "'")
+        .replace(['’', '`'], "'")
         .replace("  ", " ")
 }
 
@@ -112,7 +111,7 @@ fn load_local_planets(conn: &Connection) -> anyhow::Result<Vec<DiffPlanetRow>> {
             let np: String = row.get(1)?;
             Ok(DiffPlanetRow {
                 fid: row.get(0)?,
-                identity_key: diff_cmp_key(&np.as_str()),
+                identity_key: diff_cmp_key(np.as_str()),
                 planet: np,
                 grid_unit: row.get(2)?,
             })
