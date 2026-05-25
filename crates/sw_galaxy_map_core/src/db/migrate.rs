@@ -19,7 +19,7 @@ pub struct MigrationReport {
 }
 
 const START_SCHEMA_VERSION: i64 = 3;
-const LATEST_SCHEMA_VERSION: i64 = 13;
+const LATEST_SCHEMA_VERSION: i64 = 14;
 
 struct MigrationStep {
     from: i64,
@@ -89,6 +89,12 @@ fn migration_steps() -> &'static [MigrationStep] {
             to: 13,
             label: "coordinates normalization + grid_unit",
             apply: m_to_v13,
+        },
+        MigrationStep {
+            from: 13,
+            to: 14,
+            label: "create table for remap ",
+            apply: m_to_v14,
         },
     ]
 }
@@ -518,6 +524,36 @@ fn m_to_v13(tx: &Transaction<'_>) -> Result<()> {
     convert_table_coordinates_to_ly(tx, "planets_unknown")?;
 
     rebuild_planet_search_public(tx)?;
+
+    Ok(())
+}
+
+fn m_to_v14(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS planet_fid_remap (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                planet TEXT NOT NULL,
+                local_fid INTEGER NOT NULL,
+                remote_fid INTEGER NOT NULL,
+                strategy TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                approved INTEGER NOT NULL DEFAULT 0,
+                applied INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_planet
+            ON planet_fid_remap(planet);
+
+            CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_approved
+            ON planet_fid_remap(approved);
+
+            CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_applied
+            ON planet_fid_remap(applied);
+        "#,
+    )
+    .context("Failed to migrate schema to v14 (planet remap fid mismatch table)")?;
 
     Ok(())
 }

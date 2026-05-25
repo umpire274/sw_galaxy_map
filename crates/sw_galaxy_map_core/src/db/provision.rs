@@ -314,6 +314,32 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_search_planet_norm ON planet_search(planet_norm);
         CREATE INDEX IF NOT EXISTS idx_search_norm        ON planet_search(search_norm);
 
+        -- ==========================
+        -- PLANET FID REMAPPING TABLE
+        -- ==========================
+        DROP TABLE IF EXISTS planet_fid_remap;
+        
+        CREATE TABLE planet_fid_remap (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            planet TEXT NOT NULL,
+            local_fid INTEGER NOT NULL,
+            remote_fid INTEGER NOT NULL,
+            strategy TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            approved INTEGER NOT NULL DEFAULT 0,
+            applied INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_planet
+        ON planet_fid_remap(planet);
+
+        CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_approved
+        ON planet_fid_remap(approved);
+
+        CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_applied
+        ON planet_fid_remap(applied);
+
         -- =========================
         -- CLEAN VIEW
         -- =========================
