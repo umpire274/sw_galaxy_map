@@ -4,6 +4,7 @@ use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
 use sw_galaxy_map_core::db::pull::diff::{FidMismatchSeverity, PullDiffReport};
+use sw_galaxy_map_core::db::pull::staging::LocalPullPreparationReport;
 use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 
 pub(crate) fn print_db_init_report(report: &sw_galaxy_map_core::db::db_init::DbInitReport) {
@@ -472,7 +473,7 @@ pub(crate) fn build_galaxy_stats_tui(
     }
 }
 
-pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
+pub(crate) fn print_pull_diff_report(report: &PullDiffReport, show_suspicious: bool) {
     println!();
     println!("Local/remote pull diff completed.");
     println!("Local planets              : {}", report.local_planets);
@@ -537,16 +538,33 @@ pub(crate) fn print_pull_diff_report(report: &PullDiffReport) {
         .fid_mismatches
         .iter()
         .filter(|mismatch| mismatch.severity == FidMismatchSeverity::SuspiciousPositiveMismatch)
-        .take(20)
         .collect::<Vec<_>>();
 
     if !suspicious.is_empty() {
         println!();
-        println!("First suspicious positive FID mismatches:");
-        for mismatch in suspicious {
+        if show_suspicious {
+            println!("Suspicious positive FID mismatches:");
+        } else {
+            println!("First suspicious positive FID mismatches:");
+        }
+
+        let limit = if show_suspicious {
+            suspicious.len()
+        } else {
+            20
+        };
+
+        for mismatch in suspicious.iter().take(limit) {
             println!(
                 "  - {}: local={} remote={}",
                 mismatch.planet, mismatch.local_fid, mismatch.remote_fid
+            );
+        }
+
+        if !show_suspicious && suspicious.len() > 20 {
+            println!(
+                "  ... {} more suspicious mismatches hidden. Re-run with --show-suspicious to display all.",
+                suspicious.len() - 20
             );
         }
     }
@@ -584,4 +602,15 @@ pub(crate) fn print_pull_update_plan(plan: &PullUpdatePlan) {
             println!("  - {reason}");
         }
     }
+}
+
+pub fn print_local_pull_preparation_report(report: &LocalPullPreparationReport, backup_id: &str) {
+    println!();
+    println!("Local pull preparation completed.");
+    println!("Backup id             : {backup_id}");
+    println!("Backup tables created : {}", report.backup_tables_created);
+    println!("Staging tables created: {}", report.staging_tables_created);
+    println!("Planets backed up     : {}", report.local_planets_backed_up);
+    println!("Unknown backed up     : {}", report.local_unknown_backed_up);
+    println!("Dry run               : {}", report.dry_run);
 }

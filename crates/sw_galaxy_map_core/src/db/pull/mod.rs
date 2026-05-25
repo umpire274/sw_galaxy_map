@@ -8,5 +8,6 @@ pub mod diff;
 pub mod postgres;
 pub mod refresh;
 pub mod remap;
+pub mod staging;
 pub mod update;
 pub mod validate;

@@ -1,4 +1,6 @@
-use crate::cli::reports::{print_pull_diff_report, print_pull_update_plan};
+use crate::cli::reports::{
+    print_local_pull_preparation_report, print_pull_diff_report, print_pull_update_plan,
+};
 use crate::cli::{
     args, commands, open_db_migrating, open_db_raw, print_db_init_report, print_db_status_report,
     print_db_update_report, print_galaxy_stats, print_migration_report,
@@ -128,6 +130,7 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                 db,
                 remote_config,
                 dry_run,
+                show_suspicious,
             } => {
                 let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
 
@@ -158,12 +161,37 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
                     let report = runtime
                         .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
 
-                    print_pull_diff_report(&report);
+                    print_pull_diff_report(&report, *show_suspicious);
                     let plan = PullUpdatePlan::from_diff(&report);
                     print_pull_update_plan(&plan);
                 } else {
-                    anyhow::bail!("db pull update without --dry-run is not implemented yet");
+                    let report = runtime
+                        .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
+                    let plan = PullUpdatePlan::from_diff(&report);
+
+                    print_pull_update_plan(&plan);
+
+                    if !plan.can_apply {
+                        anyhow::bail!(
+                            "Local pull cannot be applied safely. Resolve blocking reasons first."
+                        );
+                    }
+
+                    let backup_id =
+                        format!("local_pull_{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
+
+                    let conn = rusqlite::Connection::open(&db)?;
+
+                    let preparation =
+                        sw_galaxy_map_core::db::pull::staging::prepare_local_pull_staging(
+                            &conn, &backup_id, false,
+                        )?;
+
+                    print_local_pull_preparation_report(&preparation, &backup_id);
+
+                    anyhow::bail!("Real local pull update is not implemented yet.");
                 }
+
                 Ok(())
             }
         },

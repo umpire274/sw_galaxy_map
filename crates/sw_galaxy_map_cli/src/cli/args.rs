@@ -235,6 +235,10 @@ pub enum DbCommands {
 
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+
+        /// Show all suspicious positive FID mismatches.
+        #[arg(long, default_value_t = false)]
+        show_suspicious: bool,
     },
 }
 
