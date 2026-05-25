@@ -326,9 +326,10 @@ pub fn create_schema(con: &Connection, enable_fts: bool) -> Result<()> {
             remote_fid INTEGER NOT NULL,
             strategy TEXT NOT NULL,
             confidence REAL NOT NULL,
-            approved INTEGER NOT NULL DEFAULT 0,
-            applied INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
+            approved INTEGER NOT NULL DEFAULT 0 CHECK(approved IN (0,1)),
+            applied INTEGER NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
+            created_at TEXT NOT NULL,
+            UNIQUE(local_fid, remote_fid)
         );
 
         CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_planet
