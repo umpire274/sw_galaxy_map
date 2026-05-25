@@ -233,6 +233,14 @@ pub enum DbCommands {
     Export(DbExportArgs),
 
     Pull {
+        #[command(subcommand)]
+        command: DbPullCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DbPullCommand {
+    Run {
         /// Local SQLite database path.
         #[arg(long)]
         db: PathBuf,
@@ -251,6 +259,28 @@ pub enum DbCommands {
         /// Persist suspicious FID remap candidates into the local database.
         #[arg(long, default_value_t = false)]
         persist_remap_candidates: bool,
+    },
+
+    Remap {
+        #[command(subcommand)]
+        command: DbPullRemapCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DbPullRemapCommand {
+    List {
+        /// Local SQLite database path.
+        #[arg(long)]
+        db: PathBuf,
+
+        /// Show already approved remaps too.
+        #[arg(long, default_value_t = false)]
+        show_approved: bool,
+
+        /// Show already applied remaps too.
+        #[arg(long, default_value_t = false)]
+        show_applied: bool,
     },
 }
 

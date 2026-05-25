@@ -1,5 +1,6 @@
 use crate::cli::reports::{
-    print_local_pull_preparation_report, print_pull_diff_report, print_pull_update_plan,
+    print_fid_remap_candidates, print_local_pull_preparation_report, print_pull_diff_report,
+    print_pull_update_plan,
 };
 use crate::cli::{
     args, commands, open_db_migrating, open_db_raw, print_db_init_report, print_db_status_report,
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use sw_galaxy_map_core::db::pull::config::RemoteDbConfig;
 use sw_galaxy_map_core::db::pull::diff::diff_local_with_remote;
 use sw_galaxy_map_core::db::pull::remap::{
-    build_fid_remap_candidates, persist_fid_remap_candidates,
+    build_fid_remap_candidates, list_fid_remap_candidates, persist_fid_remap_candidates,
 };
 use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 use sw_galaxy_map_core::db::pull::validate::validate_remote_database;
@@ -147,117 +148,143 @@ pub(crate) fn run_one_shot(cli: &args::Cli, cmd: &args::Commands) -> anyhow::Res
 
             args::DbCommands::Export(args) => commands::db::export::run(cli.db.clone(), args),
 
-            args::DbCommands::Pull {
-                db,
-                remote_config,
-                dry_run,
-                show_suspicious,
-                persist_remap_candidates,
-            } => {
-                let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
+            args::DbCommands::Pull { command } => match command {
+                args::DbPullCommand::Run {
+                    db,
+                    remote_config,
+                    dry_run,
+                    show_suspicious,
+                    persist_remap_candidates,
+                } => {
+                    let remote_config = RemoteDbConfig::from_json_file(&remote_config)?;
 
-                let runtime = tokio::runtime::Runtime::new()?;
+                    let runtime = tokio::runtime::Runtime::new()?;
 
-                let validation =
-                    runtime.block_on(async { validate_remote_database(&remote_config).await })?;
+                    let validation = runtime
+                        .block_on(async { validate_remote_database(&remote_config).await })?;
 
-                if !validation.is_valid {
-                    println!();
-                    println!("Remote database validation failed.");
+                    if !validation.is_valid {
+                        println!();
+                        println!("Remote database validation failed.");
 
-                    for message in &validation.messages {
-                        println!("  - {message}");
+                        for message in &validation.messages {
+                            println!("  - {message}");
+                        }
+
+                        anyhow::bail!("Remote database is not valid for local pull operations.");
                     }
+                    println!();
+                    println!("Remote database validation passed.");
+                    println!("Remote planets        : {}", validation.planets_count);
+                    println!(
+                        "Remote unknown records: {}",
+                        validation.planets_unknown_count
+                    );
 
-                    anyhow::bail!("Remote database is not valid for local pull operations.");
-                }
-                println!();
-                println!("Remote database validation passed.");
-                println!("Remote planets        : {}", validation.planets_count);
-                println!(
-                    "Remote unknown records: {}",
-                    validation.planets_unknown_count
-                );
+                    if *dry_run {
+                        let report = runtime.block_on(async {
+                            diff_local_with_remote(&db, &remote_config).await
+                        })?;
 
-                if *dry_run {
-                    let report = runtime
-                        .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
+                        print_pull_diff_report(&report, *show_suspicious);
+                        let plan = PullUpdatePlan::from_diff(&report);
+                        print_pull_update_plan(&plan);
 
-                    print_pull_diff_report(&report, *show_suspicious);
-                    let plan = PullUpdatePlan::from_diff(&report);
-                    print_pull_update_plan(&plan);
+                        let remap_candidates = build_fid_remap_candidates(&report);
 
-                    let remap_candidates = build_fid_remap_candidates(&report);
+                        if *persist_remap_candidates && !remap_candidates.is_empty() {
+                            let conn = rusqlite::Connection::open(&db)?;
 
-                    if *persist_remap_candidates && !remap_candidates.is_empty() {
+                            let inserted = persist_fid_remap_candidates(&conn, &remap_candidates)?;
+
+                            println!();
+                            println!("Persisted remap candidates.");
+                            println!("Inserted candidates      : {inserted}");
+                            println!(
+                                "Skipped existing entries : {}",
+                                remap_candidates.len().saturating_sub(inserted)
+                            );
+                        }
+
+                        if !remap_candidates.is_empty() {
+                            println!();
+                            println!(
+                                "FID remap candidates requiring review: {}",
+                                remap_candidates.len()
+                            );
+
+                            let limit = if *show_suspicious {
+                                remap_candidates.len()
+                            } else {
+                                20
+                            };
+
+                            for candidate in remap_candidates.iter().take(limit) {
+                                println!(
+                                    "  - {}: local={} remote={} strategy={:?} confidence={:.2}",
+                                    candidate.planet,
+                                    candidate.local_fid,
+                                    candidate.remote_fid,
+                                    candidate.strategy,
+                                    candidate.confidence
+                                );
+                            }
+
+                            if !*show_suspicious && remap_candidates.len() > 20 {
+                                println!(
+                                    "  ... {} more remap candidates hidden. Use --show-suspicious to inspect all suspicious FID mismatches.",
+                                    remap_candidates.len() - 20
+                                );
+                            }
+                        }
+                    } else {
+                        let report = runtime.block_on(async {
+                            diff_local_with_remote(&db, &remote_config).await
+                        })?;
+                        let plan = PullUpdatePlan::from_diff(&report);
+
+                        print_pull_update_plan(&plan);
+
+                        if !plan.can_apply {
+                            anyhow::bail!(
+                                "Local pull cannot be applied safely. Resolve blocking reasons first."
+                            );
+                        }
+
+                        let backup_id =
+                            format!("local_pull_{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
+
                         let conn = rusqlite::Connection::open(&db)?;
 
-                        let inserted = persist_fid_remap_candidates(&conn, &remap_candidates)?;
+                        let preparation =
+                            sw_galaxy_map_core::db::pull::staging::prepare_local_pull_staging(
+                                &conn, &backup_id, false,
+                            )?;
 
-                        println!();
-                        println!("Persisted remap candidates.");
-                        println!("Inserted candidates      : {inserted}");
-                        println!(
-                            "Skipped existing entries : {}",
-                            remap_candidates.len().saturating_sub(inserted)
-                        );
+                        print_local_pull_preparation_report(&preparation, &backup_id);
+
+                        anyhow::bail!("Real local pull update is not implemented yet.");
                     }
 
-                    if !remap_candidates.is_empty() {
-                        println!();
-                        println!(
-                            "FID remap candidates requiring review: {}",
-                            remap_candidates.len()
-                        );
-
-                        for candidate in remap_candidates.iter().take(20) {
-                            println!(
-                                "  - {}: local={} remote={} strategy={:?} confidence={:.2}",
-                                candidate.planet,
-                                candidate.local_fid,
-                                candidate.remote_fid,
-                                candidate.strategy,
-                                candidate.confidence
-                            );
-                        }
-
-                        if remap_candidates.len() > 20 {
-                            println!(
-                                "  ... {} more remap candidates hidden. Use --show-suspicious to inspect all suspicious FID mismatches.",
-                                remap_candidates.len() - 20
-                            );
-                        }
-                    }
-                } else {
-                    let report = runtime
-                        .block_on(async { diff_local_with_remote(&db, &remote_config).await })?;
-                    let plan = PullUpdatePlan::from_diff(&report);
-
-                    print_pull_update_plan(&plan);
-
-                    if !plan.can_apply {
-                        anyhow::bail!(
-                            "Local pull cannot be applied safely. Resolve blocking reasons first."
-                        );
-                    }
-
-                    let backup_id =
-                        format!("local_pull_{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
-
-                    let conn = rusqlite::Connection::open(&db)?;
-
-                    let preparation =
-                        sw_galaxy_map_core::db::pull::staging::prepare_local_pull_staging(
-                            &conn, &backup_id, false,
-                        )?;
-
-                    print_local_pull_preparation_report(&preparation, &backup_id);
-
-                    anyhow::bail!("Real local pull update is not implemented yet.");
+                    Ok(())
                 }
+                args::DbPullCommand::Remap { command } => match command {
+                    args::DbPullRemapCommand::List {
+                        db,
+                        show_approved,
+                        show_applied,
+                    } => {
+                        let conn = rusqlite::Connection::open(db)?;
 
-                Ok(())
-            }
+                        let candidates =
+                            list_fid_remap_candidates(&conn, *show_approved, *show_applied)?;
+
+                        print_fid_remap_candidates(&candidates);
+
+                        Ok(())
+                    }
+                },
+            },
         },
 
         args::Commands::Search {

@@ -4,6 +4,7 @@ use sw_galaxy_map_core::db::db_status::{DbHealth, DbStatusReport};
 use sw_galaxy_map_core::db::db_update::{ChangeKind, DbUpdateReport};
 use sw_galaxy_map_core::db::migrate::MigrationReport;
 use sw_galaxy_map_core::db::pull::diff::{FidMismatchSeverity, PullDiffReport};
+use sw_galaxy_map_core::db::pull::remap::StoredFidRemapCandidate;
 use sw_galaxy_map_core::db::pull::staging::LocalPullPreparationReport;
 use sw_galaxy_map_core::db::pull::update::PullUpdatePlan;
 
@@ -604,7 +605,10 @@ pub(crate) fn print_pull_update_plan(plan: &PullUpdatePlan) {
     }
 }
 
-pub fn print_local_pull_preparation_report(report: &LocalPullPreparationReport, backup_id: &str) {
+pub(crate) fn print_local_pull_preparation_report(
+    report: &LocalPullPreparationReport,
+    backup_id: &str,
+) {
     println!();
     println!("Local pull preparation completed.");
     println!("Backup id             : {backup_id}");
@@ -613,4 +617,24 @@ pub fn print_local_pull_preparation_report(report: &LocalPullPreparationReport, 
     println!("Planets backed up     : {}", report.local_planets_backed_up);
     println!("Unknown backed up     : {}", report.local_unknown_backed_up);
     println!("Dry run               : {}", report.dry_run);
+}
+
+pub(crate) fn print_fid_remap_candidates(candidates: &[StoredFidRemapCandidate]) {
+    println!();
+    println!("Stored FID remap candidates: {}", candidates.len());
+
+    for candidate in candidates {
+        println!(
+            "  [{}] {}: {} -> {} | strategy={} | confidence={:.2} | approved={} | applied={} | created_at={}",
+            candidate.id,
+            candidate.planet,
+            candidate.local_fid,
+            candidate.remote_fid,
+            candidate.strategy,
+            candidate.confidence,
+            candidate.approved,
+            candidate.applied,
+            candidate.created_at
+        );
+    }
 }

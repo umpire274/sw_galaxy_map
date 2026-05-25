@@ -25,6 +25,19 @@ pub struct FidRemapCandidate {
     pub confidence: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredFidRemapCandidate {
+    pub id: i64,
+    pub planet: String,
+    pub local_fid: i64,
+    pub remote_fid: i64,
+    pub strategy: String,
+    pub confidence: f64,
+    pub approved: bool,
+    pub applied: bool,
+    pub created_at: String,
+}
+
 /// Builds FID remap candidates from a pull diff report.
 pub fn build_fid_remap_candidates(report: &PullDiffReport) -> Vec<FidRemapCandidate> {
     report
@@ -82,4 +95,55 @@ pub fn persist_fid_remap_candidates(
     }
 
     Ok(inserted)
+}
+
+pub fn list_fid_remap_candidates(
+    conn: &Connection,
+    show_approved: bool,
+    show_applied: bool,
+) -> anyhow::Result<Vec<StoredFidRemapCandidate>> {
+    let mut query = String::from(
+        r#"
+        SELECT
+            id,
+            planet,
+            local_fid,
+            remote_fid,
+            strategy,
+            confidence,
+            approved,
+            applied,
+            created_at
+        FROM planet_fid_remap
+        WHERE 1=1
+        "#,
+    );
+
+    if !show_approved {
+        query.push_str(" AND approved = 0");
+    }
+
+    if !show_applied {
+        query.push_str(" AND applied = 0");
+    }
+
+    query.push_str(" ORDER BY confidence DESC, planet ASC");
+
+    let mut stmt = conn.prepare(&query)?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(StoredFidRemapCandidate {
+            id: row.get(0)?,
+            planet: row.get(1)?,
+            local_fid: row.get(2)?,
+            remote_fid: row.get(3)?,
+            strategy: row.get(4)?,
+            confidence: row.get(5)?,
+            approved: row.get::<_, i64>(6)? != 0,
+            applied: row.get::<_, i64>(7)? != 0,
+            created_at: row.get(8)?,
+        })
+    })?;
+
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
