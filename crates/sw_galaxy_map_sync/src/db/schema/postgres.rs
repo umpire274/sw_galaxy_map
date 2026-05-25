@@ -217,6 +217,24 @@ pub async fn create_postgres_schema(conn: &mut PgConnection) -> anyhow::Result<(
     )
     .await?;
 
+    conn.execute(
+        r#"
+            CREATE TABLE IF NOT EXISTS planet_fid_remap (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                planet TEXT NOT NULL,
+                local_fid INTEGER NOT NULL,
+                remote_fid INTEGER NOT NULL,
+                strategy TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                approved INTEGER NOT NULL DEFAULT 0 CHECK(approved IN (0,1)),
+                applied INTEGER NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
+                created_at TEXT NOT NULL,
+                UNIQUE(local_fid, remote_fid)
+            );
+        "#,
+    )
+    .await?;
+
     create_postgres_indexes(conn).await?;
     create_postgres_views(conn).await?;
     upsert_schema_version(conn).await?;
@@ -257,6 +275,9 @@ async fn create_postgres_indexes(conn: &mut PgConnection) -> anyhow::Result<()> 
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_fingerprint ON waypoints (fingerprint)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_waypoints_name_norm ON waypoints (name_norm)",
         "CREATE INDEX IF NOT EXISTS idx_waypoints_xy ON waypoints (x, y)",
+        "CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_planet ON planet_fid_remap(planet)",
+        "CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_approved ON planet_fid_remap(approved)",
+        "CREATE INDEX IF NOT EXISTS idx_planet_fid_remap_applied ON planet_fid_remap(applied)",
     ];
 
     for statement in statements {
@@ -297,7 +318,7 @@ async fn upsert_schema_version(conn: &mut PgConnection) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         INSERT INTO meta (key, value)
-        VALUES ('schema_version', '13')
+        VALUES ('schema_version', '14')
         ON CONFLICT (key) DO UPDATE SET
             value = EXCLUDED.value
         "#,
